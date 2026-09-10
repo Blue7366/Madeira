@@ -19,10 +19,11 @@ typedef struct JITRegion JITRegion;
 //   - RX view: for executing generated code
 JITRegion *jit_region_create(size_t size);
 
-// Create a process-lifetime legacy JIT pool for iOS versions before 17.4.
-// The pool uses the older in-process dual-map path rather than the
-// iOS-26-specific StikDebug BRK protocol. The returned views share backing
-// memory and are intentionally retained until process exit.
+// Create a process-lifetime legacy JIT pool for iOS versions before 17.4 or
+// for a jailbroken process on any supported iOS version. The pool uses the
+// older in-process dual-map path rather than the StikDebug BRK protocol. The
+// returned views share backing memory and are intentionally retained until
+// process exit.
 bool jit_legacy_pool_create(size_t size, void **rw_ptr, void **rx_ptr);
 
 // Destroy a JIT region and unmap both views.

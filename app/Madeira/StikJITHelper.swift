@@ -5,10 +5,18 @@ import UIKit
 /// then allocates JIT memory and detaches the debugger.
 enum StikJITHelper {
 
+    /// True when a jailbreak tweak/bootstrap is present in this process.
+    /// Jailbreaks use the in-process dual-map allocator on every iOS version,
+    /// so they do not need SideStore or the iOS 17.4+ StikDebug protocol.
+    static var usesJailbreakSupport: Bool {
+        madeira_jb_is_jailbroken()
+    }
+
     /// iOS 16 does not support the current StikDebug BRK/RSD protocol.
     /// SideStore's built-in JIT path can set CS_DEBUGGED, after which Madeira
     /// creates its own legacy dual-mapped pool.
     static var usesLegacyJIT: Bool {
+        if usesJailbreakSupport { return true }
         if #available(iOS 17.4, *) { return false }
         return true
     }
@@ -31,6 +39,7 @@ enum StikJITHelper {
 
     /// Check if StikDebug or StikJIT is available by trying to open their URL.
     static var isAvailable: Bool {
+        if usesJailbreakSupport { return true }
         if usesLegacyJIT { return true }
         guard let url = URL(string: "stikjit://enable-jit") else { return false }
         return UIApplication.shared.canOpenURL(url)
@@ -39,6 +48,18 @@ enum StikJITHelper {
     /// Open StikDebug with our JIT script embedded in the URL.
     /// StikDebug will attach to our process and run the script.
     static func enableJIT(completion: @escaping (Bool) -> Void) {
+        if usesJailbreakSupport {
+            madeira_jb_initialize()
+            let enabled = madeira_jb_is_debugged()
+            let memory = madeira_jb_increase_memory_limit()
+            LogStore.shared.log(
+                "Jailbreak support: JIT \(enabled ? "enabled" : "not enabled"), memory limit \(memory ? "raised" : "unchanged")",
+                level: enabled ? .success : .error
+            )
+            completion(enabled)
+            return
+        }
+
         if usesLegacyJIT {
             let enabled = jit_check_debugged()
             if enabled {
@@ -102,7 +123,10 @@ enum StikJITHelper {
     static func allocatePool(poolSize: Int = 128 * 1024 * 1024) -> (rx: UnsafeMutableRawPointer, rw: UnsafeMutableRawPointer, size: Int)? {
         if usesLegacyJIT {
             guard jit_check_debugged() else {
-                LogStore.shared.log("Legacy JIT is not enabled. Use SideStore's Enable JIT action first.", level: .error)
+                let instruction = usesJailbreakSupport
+                    ? "Jailbreak JIT is not active. Verify tweak injection is enabled for Madeira."
+                    : "Legacy JIT is not enabled. Use SideStore's Enable JIT action first."
+                LogStore.shared.log(instruction, level: .error)
                 return nil
             }
 

@@ -3,6 +3,7 @@
 
 #include "FEXBridge.h"
 #include "JITAllocator.h"
+#include "JailbreakSupport.h"
 
 // Xcode defines DEBUG=1 in debug builds which conflicts with FEX's LogMan::DEBUG enum
 #ifdef DEBUG
@@ -90,9 +91,11 @@ static size_t align_up(size_t val, size_t align) {
 }
 
 // StikDebug's current protocol starts at iOS 17.4. iOS 16 uses the older
-// external-JIT path, so it must receive a pool from jit_region_create() rather
-// than sending iOS-26 BRK commands that no iOS-16 JIT helper understands.
+// external-JIT path, and a jailbroken process can use the same in-process
+// dual-map path on all supported iOS versions. Both must receive a pool from
+// jit_region_create() rather than sending BRK commands to StikDebug.
 static bool use_legacy_jit_backend(void) {
+    if (madeira_jb_is_jailbroken()) return true;
     if (@available(iOS 17.4, *)) return false;
     return true;
 }

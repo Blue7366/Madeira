@@ -1,4 +1,5 @@
 #import "JITAllocator.h"
+#import "JailbreakSupport.h"
 #import "FEXBridge.h"
 #import "WineServerBridge.h"
 #import "WineProcessBridge.h"

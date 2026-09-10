@@ -1080,8 +1080,8 @@ struct ContentView: View {
         HStack(spacing: 8) {
             // Live debugger/JIT state, not the (macOS-only, never granted on
             // iOS) allow-jit entitlement the old badge checked.
-            entitlementBadge("JIT", granted: debuggerAttached)
-            entitlementBadge("Memory+", granted: ents.increasedMemory)
+            entitlementBadge("JIT", granted: debuggerAttached || ents.automaticJIT)
+            entitlementBadge("Memory+", granted: ents.increasedMemory || ents.automaticMemory)
             entitlementBadge("64-bit VA", granted: ents.extendedVA)
             Spacer()
             // Device model rides in this row (the old standalone statusHeader
@@ -1126,7 +1126,12 @@ struct ContentView: View {
         logStore.log("  allow-jit: \(ents.jitAllowed)", level: ents.jitAllowed ? .success : .error)
         logStore.log("  increased-memory-limit: \(ents.increasedMemory)", level: ents.increasedMemory ? .success : .debug)
         logStore.log("  extended-virtual-addressing: \(ents.extendedVA)", level: ents.extendedVA ? .success : .debug)
-        if !ents.extendedVA {
+        logStore.log("  jailbreak detected: \(ents.jailbroken)", level: ents.jailbroken ? .success : .debug)
+        if ents.jailbroken {
+            logStore.log("  automatic JIT: \(ents.automaticJIT)", level: ents.automaticJIT ? .success : .error)
+            logStore.log("  jailbreak memory override: \(ents.automaticMemory)", level: ents.automaticMemory ? .success : .error)
+        }
+        if !ents.extendedVA && !ents.jailbroken {
             logStore.log("  Tip: Use GetMoreRam to inject extended-virtual-addressing", level: .info)
         }
     }
@@ -1720,7 +1725,9 @@ struct ContentView: View {
 
     private func enableJITViaStikDebug() {
         jitStatus = .testing
-        if StikJITHelper.usesLegacyJIT {
+        if StikJITHelper.usesJailbreakSupport {
+            logStore.log("Using jailbreak support: enabling JIT and raising the memory limit automatically...")
+        } else if StikJITHelper.usesLegacyJIT {
             logStore.log("Checking legacy iOS 16 JIT status. Enable JIT from SideStore first...")
         } else {
             logStore.log("Requesting JIT via StikDebug URL scheme...")
@@ -1741,8 +1748,14 @@ struct ContentView: View {
     /// Debugger stays attached during PE loading so mprotect_exec can use BRK
     /// to prepare code pages. Detach happens after Wine finishes + recovery.
     private func runWineFullSequence() {
+        if StikJITHelper.usesJailbreakSupport {
+            madeira_jb_initialize()
+        }
         guard jit_check_debugged() else {
-            logStore.log("JIT not enabled. Press 'Enable JIT' first.", level: .error)
+            let message = StikJITHelper.usesJailbreakSupport
+                ? "Jailbreak JIT is not active. Enable tweak injection for Madeira and try again."
+                : "JIT not enabled. Press 'Enable JIT' first."
+            logStore.log(message, level: .error)
             return
         }
 
@@ -2397,7 +2410,13 @@ struct SetupGuideView: View {
         NavigationStack {   /* ml658: see the note on the main body */
             List {
                 Section("Requirements") {
-                    if StikJITHelper.usesLegacyJIT {
+                    if StikJITHelper.usesJailbreakSupport {
+                        guideRow(
+                            icon: "cpu",
+                            title: "Automatic JIT (jailbreak)",
+                            detail: "Madeira enables the in-process JIT path at launch. No SideStore or StikDebug action is required. Tweak injection must be enabled for Madeira."
+                        )
+                    } else if StikJITHelper.usesLegacyJIT {
                         guideRow(
                             icon: "cpu",
                             title: "JIT Compilation",
@@ -2413,20 +2432,30 @@ struct SetupGuideView: View {
                     guideRow(
                         icon: "memorychip",
                         title: "Increased Memory Limit",
-                        detail: "Raises the Jetsam memory threshold. Included in the app entitlements. If not detected, use GetMoreRam to inject it."
+                        detail: StikJITHelper.usesJailbreakSupport
+                            ? "Madeira requests the maximum Jetsam limit automatically through the jailbreak memorystatus API."
+                            : "Raises the Jetsam memory threshold. Included in the app entitlements. If not detected, use GetMoreRam to inject it."
                     )
                     guideRow(
                         icon: "arrow.up.left.and.arrow.down.right",
                         title: "Extended Virtual Addressing",
-                        detail: "Expands virtual address space to ~64GB. Required for large games. Must be injected via GetMoreRam (free accounts can't provision this)."
+                        detail: "The extended-virtual-addressing entitlement is included for signing systems that permit it. A jailbreak can preserve or inject restricted entitlements; otherwise this row may remain unavailable."
                     )
                 }
 
                 Section("Setup Steps") {
-                    stepRow(number: 1, text: "Install Madeira via SideStore or Xcode")
-                    stepRow(number: 2, text: "Install GetMoreRam and run it to inject memory entitlements into your App ID")
-                    stepRow(number: 3, text: "Reinstall Madeira with the same IPA to apply injected entitlements")
-                    if StikJITHelper.usesLegacyJIT {
+                    if StikJITHelper.usesJailbreakSupport {
+                        stepRow(number: 1, text: "Install Madeira with jailbreak tweak injection enabled")
+                        stepRow(number: 2, text: "Launch Madeira; it automatically enables JIT and requests the memory-limit override")
+                        stepRow(number: 3, text: "Tap 'Enable JIT' only if you want to retry the jailbreak setup")
+                    } else {
+                        stepRow(number: 1, text: "Install Madeira via SideStore or Xcode")
+                        stepRow(number: 2, text: "Install GetMoreRam and run it to inject memory entitlements into your App ID")
+                        stepRow(number: 3, text: "Reinstall Madeira with the same IPA to apply injected entitlements")
+                    }
+                    if StikJITHelper.usesJailbreakSupport {
+                        stepRow(number: 4, text: "Verify the JIT and Memory+ badges, then tap 'Test JIT'")
+                    } else if StikJITHelper.usesLegacyJIT {
                         stepRow(number: 4, text: "In SideStore, long-press Madeira and choose 'Enable JIT'")
                     } else {
                         stepRow(number: 4, text: "In StikDebug, assign the 'universal' JIT script to Madeira and launch it")
