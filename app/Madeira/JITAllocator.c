@@ -209,6 +209,32 @@ JITRegion *jit_region_create(size_t size) {
     return region;
 }
 
+// Legacy iOS JIT path used on iOS 16 and earlier. Unlike the newer
+// StikDebug BRK protocol, this creates the dual-mapped executable region
+// inside the app after an external JIT enabler has set CS_DEBUGGED.
+//
+// The region is deliberately not destroyed: FEX and the ARM64EC PE runtime
+// hold pointers into the pool for the entire process lifetime.
+bool jit_legacy_pool_create(size_t size, void **rw_ptr, void **rx_ptr) {
+    if (!rw_ptr || !rx_ptr) return false;
+    *rw_ptr = NULL;
+    *rx_ptr = NULL;
+
+    if (!jit_check_debugged()) {
+        jit_log("Legacy JIT pool requested without CS_DEBUGGED");
+        return false;
+    }
+
+    JITRegion *region = jit_region_create(size);
+    if (!region) return false;
+
+    *rw_ptr = jit_region_rw_ptr(region);
+    *rx_ptr = jit_region_rx_ptr(region);
+    jit_log("Legacy JIT pool ready: RW=%p RX=%p size=%zu (retained until exit)",
+            *rw_ptr, *rx_ptr, jit_region_size(region));
+    return *rw_ptr != NULL && *rx_ptr != NULL;
+}
+
 // ml358: make an ALREADY-MAPPED region jetsam-exempt.
 //
 // jit_region_create() marks its memory entry NO_FOOTPRINT, but the production

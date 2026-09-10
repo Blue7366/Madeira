@@ -1720,7 +1720,11 @@ struct ContentView: View {
 
     private func enableJITViaStikDebug() {
         jitStatus = .testing
-        logStore.log("Requesting JIT via StikDebug URL scheme...")
+        if StikJITHelper.usesLegacyJIT {
+            logStore.log("Checking legacy iOS 16 JIT status. Enable JIT from SideStore first...")
+        } else {
+            logStore.log("Requesting JIT via StikDebug URL scheme...")
+        }
 
         StikJITHelper.enableJIT { success in
             if success {
@@ -1991,12 +1995,17 @@ struct ContentView: View {
             }
 
             winios_phase("pool-alloc-begin")
-            logStore.log("Allocating \(poolSizeMB)MB JIT pool (BRK will suspend process)...")
+            let poolDescription = StikJITHelper.usesLegacyJIT
+                ? "legacy dual-map"
+                : "StikDebug BRK"
+            logStore.log("Allocating \(poolSizeMB)MB JIT pool (\(poolDescription))...")
             let t0 = CFAbsoluteTimeGetCurrent()
             let pool = StikJITHelper.allocatePool(poolSize: poolSizeMB * 1024 * 1024)
             let elapsed = CFAbsoluteTimeGetCurrent() - t0
             winios_phase("pool-ready")
-            logStore.log("BRK suspension lasted \(String(format: "%.2f", elapsed))s")
+            if !StikJITHelper.usesLegacyJIT {
+                logStore.log("BRK suspension lasted \(String(format: "%.2f", elapsed))s")
+            }
 
             // ml762: remote Metal backend. Documents/madeira-remote.txt holds
             // "<host-ip> <token>" and routes winemetal to a Metal daemon on that
@@ -2388,11 +2397,19 @@ struct SetupGuideView: View {
         NavigationStack {   /* ml658: see the note on the main body */
             List {
                 Section("Requirements") {
-                    guideRow(
-                        icon: "cpu",
-                        title: "JIT Compilation",
-                        detail: "Required for x86 code translation. On iOS 26, StikDebug must stay attached — assign the 'universal' or 'MeloNX' JIT script to Madeira in StikDebug."
-                    )
+                    if StikJITHelper.usesLegacyJIT {
+                        guideRow(
+                            icon: "cpu",
+                            title: "JIT Compilation",
+                            detail: "Required for x86 code translation. On iOS 16, enable JIT for Madeira from SideStore before launching the app."
+                        )
+                    } else {
+                        guideRow(
+                            icon: "cpu",
+                            title: "JIT Compilation",
+                            detail: "Required for x86 code translation. On iOS 26, assign the 'universal' or 'MeloNX' JIT script to Madeira in StikDebug."
+                        )
+                    }
                     guideRow(
                         icon: "memorychip",
                         title: "Increased Memory Limit",
@@ -2409,7 +2426,11 @@ struct SetupGuideView: View {
                     stepRow(number: 1, text: "Install Madeira via SideStore or Xcode")
                     stepRow(number: 2, text: "Install GetMoreRam and run it to inject memory entitlements into your App ID")
                     stepRow(number: 3, text: "Reinstall Madeira with the same IPA to apply injected entitlements")
-                    stepRow(number: 4, text: "In StikDebug, assign the 'universal' JIT script to Madeira and launch it")
+                    if StikJITHelper.usesLegacyJIT {
+                        stepRow(number: 4, text: "In SideStore, long-press Madeira and choose 'Enable JIT'")
+                    } else {
+                        stepRow(number: 4, text: "In StikDebug, assign the 'universal' JIT script to Madeira and launch it")
+                    }
                     stepRow(number: 5, text: "Launch Madeira and tap 'Test JIT' to verify")
                 }
 

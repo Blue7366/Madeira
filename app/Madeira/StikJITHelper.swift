@@ -5,6 +5,14 @@ import UIKit
 /// then allocates JIT memory and detaches the debugger.
 enum StikJITHelper {
 
+    /// iOS 16 does not support the current StikDebug BRK/RSD protocol.
+    /// SideStore's built-in JIT path can set CS_DEBUGGED, after which Madeira
+    /// creates its own legacy dual-mapped pool.
+    static var usesLegacyJIT: Bool {
+        if #available(iOS 17.4, *) { return false }
+        return true
+    }
+
     /// The JIT script. Edit madeira-jit.js, then run:
     ///   base64 -i app/Madeira/madeira-jit.js | tr -d '\n' | pbcopy
     /// and paste below. TODO: load from bundle resource instead.
@@ -23,6 +31,7 @@ enum StikJITHelper {
 
     /// Check if StikDebug or StikJIT is available by trying to open their URL.
     static var isAvailable: Bool {
+        if usesLegacyJIT { return true }
         guard let url = URL(string: "stikjit://enable-jit") else { return false }
         return UIApplication.shared.canOpenURL(url)
     }
@@ -30,6 +39,17 @@ enum StikJITHelper {
     /// Open StikDebug with our JIT script embedded in the URL.
     /// StikDebug will attach to our process and run the script.
     static func enableJIT(completion: @escaping (Bool) -> Void) {
+        if usesLegacyJIT {
+            let enabled = jit_check_debugged()
+            if enabled {
+                LogStore.shared.log("Legacy JIT is enabled (CS_DEBUGGED set).")
+            } else {
+                LogStore.shared.log("On iOS 16, enable JIT for Madeira from SideStore, then tap this button again.", level: .info)
+            }
+            completion(enabled)
+            return
+        }
+
         let bundleId = Bundle.main.bundleIdentifier ?? "com.madeira.emulator"
 
         // Build the URL with script data
@@ -80,6 +100,24 @@ enum StikJITHelper {
     /// Allocate a JIT memory pool via BRK #0xf00d WITHOUT detaching the debugger.
     /// The debugger stays attached so Wine can use BRK to prepare PE code pages.
     static func allocatePool(poolSize: Int = 128 * 1024 * 1024) -> (rx: UnsafeMutableRawPointer, rw: UnsafeMutableRawPointer, size: Int)? {
+        if usesLegacyJIT {
+            guard jit_check_debugged() else {
+                LogStore.shared.log("Legacy JIT is not enabled. Use SideStore's Enable JIT action first.", level: .error)
+                return nil
+            }
+
+            var rwPtr: UnsafeMutableRawPointer?
+            var rxPtr: UnsafeMutableRawPointer?
+            guard jit_legacy_pool_create(poolSize, &rwPtr, &rxPtr),
+                  let rwPtr,
+                  let rxPtr else {
+                LogStore.shared.log("Failed to create the legacy dual-mapped JIT pool.", level: .error)
+                return nil
+            }
+            LogStore.shared.log("Legacy JIT pool ready: RX=\(String(format: "%p", Int(bitPattern: rxPtr))), RW=\(String(format: "%p", Int(bitPattern: rwPtr))), size=\(poolSize / 1024 / 1024)MB", level: .success)
+            return (rx: rxPtr, rw: rwPtr, size: poolSize)
+        }
+
         LogStore.shared.log("Allocating \(poolSize / 1024 / 1024)MB JIT pool via debugger...")
 
         // iOS-Madeira: FEX's dispatcher emit has a position-dependent encoding
@@ -305,6 +343,12 @@ enum StikJITHelper {
 
     /// Detach the debugger. Call this after Wine is done loading PE DLLs.
     static func detachDebugger() {
+        if usesLegacyJIT {
+            setenv("MADEIRA_DETACHED", "1", 1)
+            LogStore.shared.log("Legacy JIT backend: no StikDebug detach required.", level: .debug)
+            return
+        }
+
         LogStore.shared.log("Detaching debugger...")
         jit26_detach()
         // task #34: signal in-process waiters (share-probe poller). CS_DEBUGGED

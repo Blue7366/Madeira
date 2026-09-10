@@ -1,0 +1,40 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Madeira and all submodules
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Select Xcode with the iOS 26 SDK
+        run: |
+          XCODE_PATH="$(ls -dt /Applications/Xcode_26*.app | head -n 1)"
+          test -n "$XCODE_PATH"
+          sudo xcode-select --switch "$XCODE_PATH"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build and package unsigned IPA
+        run: bash scripts/ci-build-ipa.sh
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Madeira-unsigned-ipa
+          path: build/Madeira-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7

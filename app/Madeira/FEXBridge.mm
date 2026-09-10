@@ -89,6 +89,14 @@ static size_t align_up(size_t val, size_t align) {
     return (val + align - 1) & ~(align - 1);
 }
 
+// StikDebug's current protocol starts at iOS 17.4. iOS 16 uses the older
+// external-JIT path, so it must receive a pool from jit_region_create() rather
+// than sending iOS-26 BRK commands that no iOS-16 JIT helper understands.
+static bool use_legacy_jit_backend(void) {
+    if (@available(iOS 17.4, *)) return false;
+    return true;
+}
+
 // Sub-allocate from the JIT pool. Returns RX pointer (canonical address).
 static void *jit_pool_alloc(size_t size) {
     size = align_up(size, JIT_PAGE_SIZE);
@@ -120,41 +128,50 @@ static bool jit_pool_init(void) {
     }
 
     size_t size = JIT_POOL_SIZE;
-    mach_port_t task = mach_task_self();
+    if (use_legacy_jit_backend()) {
+        fex_log("Using legacy dual-map JIT pool for iOS before 17.4...");
+        if (!jit_legacy_pool_create(size, &g_jit_rw_base, &g_jit_rx_base)) {
+            fex_log("FAIL: Legacy dual-map JIT pool creation failed");
+            return false;
+        }
+    } else {
+        mach_port_t task = mach_task_self();
 
-    // Step 1: Ask debugger to allocate RX pages
-    fex_log("Requesting debugger to allocate %zu bytes of RX memory...", size);
-    void *rx_ptr = jit26_prepare_region(NULL, size);
-    if (!rx_ptr) {
-        fex_log("FAIL: Debugger RX allocation returned NULL");
-        return false;
+        // Step 1: Ask debugger to allocate RX pages
+        fex_log("Requesting debugger to allocate %zu bytes of RX memory...", size);
+        void *rx_ptr = jit26_prepare_region(NULL, size);
+        if (!rx_ptr) {
+            fex_log("FAIL: Debugger RX allocation returned NULL");
+            return false;
+        }
+        fex_log("Debugger allocated RX at %p", rx_ptr);
+
+        // Step 2: vm_remap to create RW view of the same pages
+        vm_address_t rw_addr = 0;
+        vm_prot_t cur_prot = 0, max_prot = 0;
+        kern_return_t kr = vm_remap(
+            task, &rw_addr, size, 0,
+            VM_FLAGS_ANYWHERE, task,
+            (vm_address_t)rx_ptr, FALSE,
+            &cur_prot, &max_prot, VM_INHERIT_NONE
+        );
+        if (kr != KERN_SUCCESS) {
+            fex_log("FAIL: vm_remap for RW mirror: %s (kr=%d)", mach_error_string(kr), kr);
+            return false;
+        }
+
+        // Step 3: Set the remapped view to RW
+        kr = vm_protect(task, rw_addr, size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+        if (kr != KERN_SUCCESS) {
+            fex_log("FAIL: vm_protect(RW): %s (kr=%d)", mach_error_string(kr), kr);
+            vm_deallocate(task, rw_addr, size);
+            return false;
+        }
+
+        g_jit_rx_base = rx_ptr;
+        g_jit_rw_base = reinterpret_cast<void*>(rw_addr);
     }
-    fex_log("Debugger allocated RX at %p", rx_ptr);
 
-    // Step 2: vm_remap to create RW view of the same pages
-    vm_address_t rw_addr = 0;
-    vm_prot_t cur_prot = 0, max_prot = 0;
-    kern_return_t kr = vm_remap(
-        task, &rw_addr, size, 0,
-        VM_FLAGS_ANYWHERE, task,
-        (vm_address_t)rx_ptr, FALSE,
-        &cur_prot, &max_prot, VM_INHERIT_NONE
-    );
-    if (kr != KERN_SUCCESS) {
-        fex_log("FAIL: vm_remap for RW mirror: %s (kr=%d)", mach_error_string(kr), kr);
-        return false;
-    }
-
-    // Step 3: Set the remapped view to RW
-    kr = vm_protect(task, rw_addr, size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-    if (kr != KERN_SUCCESS) {
-        fex_log("FAIL: vm_protect(RW): %s (kr=%d)", mach_error_string(kr), kr);
-        vm_deallocate(task, rw_addr, size);
-        return false;
-    }
-
-    g_jit_rx_base = rx_ptr;
-    g_jit_rw_base = reinterpret_cast<void*>(rw_addr);
     g_jit_pool_size = size;
 
     int64_t write_offset = reinterpret_cast<intptr_t>(g_jit_rw_base) - reinterpret_cast<intptr_t>(g_jit_rx_base);
