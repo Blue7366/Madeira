@@ -20,11 +20,17 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Select Xcode with the iOS 26 SDK
+      - name: Select Xcode
         run: |
-          XCODE_PATH="$(ls -dt /Applications/Xcode_26*.app | head -n 1)"
-          test -n "$XCODE_PATH"
-          sudo xcode-select --switch "$XCODE_PATH"
+          set -euxo pipefail
+          ls -d /Applications/Xcode*.app
+          XCODE_PATH="$(ls -d /Applications/Xcode_2*.app 2>/dev/null | sort -V | tail -n 1 || true)"
+          if [ -n "$XCODE_PATH" ]; then
+            sudo xcode-select --switch "$XCODE_PATH/Contents/Developer"
+          else
+            sudo xcode-select --switch \
+              "$(ls -d /Applications/Xcode_1*.app | sort -V | tail -n 1)/Contents/Developer"
+          fi
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
