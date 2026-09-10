@@ -87,6 +87,8 @@ if [[ ! -d "$LLVM_IOS_BUILD/lib" || -z "$(find "$LLVM_IOS_BUILD/lib" -name '*.a'
         -DLLVM_TARGETS_TO_BUILD= \
         -DLLVM_TABLEGEN="$LLVM_HOST_BUILD/bin/llvm-tblgen" \
         -DLLVM_NATIVE_TOOL_DIR="$LLVM_HOST_BUILD/bin" \
+        -DLLVM_INCLUDE_TOOLS=OFF \
+        -DLLVM_INCLUDE_UTILS=OFF \
         -DLLVM_BUILD_UTILS=OFF \
         -DLLVM_BUILD_TOOLS=OFF \
         -DLLVM_INCLUDE_TESTS=OFF \
@@ -94,7 +96,19 @@ if [[ ! -d "$LLVM_IOS_BUILD/lib" || -z "$(find "$LLVM_IOS_BUILD/lib" -name '*.a'
         -DLLVM_ENABLE_ZLIB=OFF \
         -DLLVM_ENABLE_TERMINFO=OFF \
         -DLLVM_ENABLE_LIBEDIT=OFF
-    cmake --build "$LLVM_IOS_BUILD" -j "$JOBS"
+    LLVM_IOS_ARCHIVE_TARGETS=()
+    while IFS= read -r target; do
+        LLVM_IOS_ARCHIVE_TARGETS+=("$target")
+    done < <(
+        ninja -C "$LLVM_IOS_BUILD" -t targets all \
+            | sed -n 's#^\(lib/lib[^:]*\.a\):.*#\1#p' \
+            | sort -u
+    )
+    if [[ "${#LLVM_IOS_ARCHIVE_TARGETS[@]}" -eq 0 ]]; then
+        echo "error: no static LLVM archive targets were generated" >&2
+        exit 1
+    fi
+    cmake --build "$LLVM_IOS_BUILD" --target "${LLVM_IOS_ARCHIVE_TARGETS[@]}" -j "$JOBS"
 fi
 
 echo "==> Building FEXCore for iOS"
