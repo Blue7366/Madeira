@@ -117,7 +117,9 @@ bool madeira_jb_is_debugged(void) {
 #endif
 }
 
-static kern_return_t madeira_catch_exception_raise(
+// exc_server dispatches to this conventional callback name, matching the
+// generated Mach exception server interface used by UTM.
+kern_return_t catch_exception_raise(
     mach_port_t exception_port,
     mach_port_t thread,
     mach_port_t task,
