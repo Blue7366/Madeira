@@ -39,6 +39,25 @@ jobs:
           fi
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+      - name: Test PMR backport
+        run: |
+          set -euo pipefail
+          TEST_BIN="$RUNNER_TEMP/pmr-compat-test"
+          xcrun --sdk macosx clang++ -std=c++20 -mmacosx-version-min=13.3 \
+            app/Madeira/PMRCompat.cpp tests/pmr_compat.cpp -o "$TEST_BIN"
+          xcrun nm -u "$TEST_BIN" > "$RUNNER_TEMP/pmr-test-imports.txt"
+          if grep 'St3__13pmr' "$RUNNER_TEMP/pmr-test-imports.txt"; then
+            echo "ERROR: PMR test still depends on the newer system runtime"
+            exit 1
+          fi
+          "$TEST_BIN"
+          # Compile the real iOS path too, and verify both missing symbols exist.
+          xcrun --sdk iphoneos clang++ -std=c++20 -arch arm64 \
+            -miphoneos-version-min="$IOS_DEPLOYMENT_TARGET" \
+            -c app/Madeira/PMRCompat.cpp -o "$RUNNER_TEMP/pmr-compat-ios.o"
+          xcrun nm -gU "$RUNNER_TEMP/pmr-compat-ios.o" > "$RUNNER_TEMP/pmr-ios-symbols.txt"
+          grep '__ZNSt3__13pmr15memory_resourceD2Ev' "$RUNNER_TEMP/pmr-ios-symbols.txt"
+          grep '__ZTINSt3__13pmr15memory_resourceE' "$RUNNER_TEMP/pmr-ios-symbols.txt"
       - name: Host dependencies
         run: |
           set -euxo pipefail
@@ -619,6 +638,15 @@ jobs:
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build
+      - name: Check iOS 16 PMR compatibility
+        run: |
+          set -euo pipefail
+          xcrun nm -u out/Madeira.app/Madeira > "$RUNNER_TEMP/madeira-imports.txt"
+          if grep 'St3__13pmr' "$RUNNER_TEMP/madeira-imports.txt"; then
+            echo "ERROR: Madeira imports PMR symbols that require iOS 17"
+            exit 1
+          fi
+          echo "No dynamic PMR imports remain in Madeira"
       - name: Package IPA
         run: |
           set -euxo pipefail
