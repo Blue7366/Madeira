@@ -35,6 +35,7 @@ struct LibraryGame: Identifiable, Codable, Equatable {
 final class GameLibrary: ObservableObject {
     @Published private(set) var games: [LibraryGame] = []
     @Published var errorMessage: String?
+    @Published private var fileRevision = 0
     let documents: URL
     private var canSave = true
     private var libraryURL: URL { documents.appendingPathComponent("madeira-library.json") }
@@ -65,7 +66,7 @@ final class GameLibrary: ObservableObject {
     func isInstalled(_ game: LibraryGame) -> Bool {
         if LibraryGame.tools.contains(where: { $0.id == game.id }) { return true }
         if game.kind == .steam {
-            return [game.executable, "C:\\Program Files\\Steam\\steam.exe", "C:\\Steam\\steam.exe"]
+            return [game.executable, "C:\\Program Files\\Steam\\steam.exe"]
                 .contains { path in localURL(for: path).map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
         }
         guard let url = localURL(for: game.executable) else { return false }
@@ -87,6 +88,7 @@ final class GameLibrary: ObservableObject {
     }
 
     func remove(_ game: LibraryGame) { save(games.filter { $0.id != game.id }) }
+    func refreshFiles() { fileRevision += 1 }
 
     @discardableResult
     func add(title: String, executable: String, arguments: String) -> Bool {

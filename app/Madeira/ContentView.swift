@@ -588,11 +588,7 @@ struct JoystickFace: View {
     private let knobTravelRatio: CGFloat = 0.30
 
     @ViewBuilder private var interior: some View {
-        if #available(iOS 26.0, *) {
-            Circle().fill(.clear).glassEffect(.regular, in: Circle())
-        } else {
-            Circle().fill(.ultraThinMaterial)
-        }
+        Circle().fill(.ultraThinMaterial)
     }
 
     private func knobOffset(_ d: CGFloat) -> CGSize {
@@ -887,6 +883,7 @@ struct ContentView: View {
     @State private var sessionMessage = ""
     @State private var launchError: String?
     @State private var sessionUsed = false
+    @State private var launchHeartbeat: Timer?
     @ObservedObject private var input = InputSettings.shared
     @ObservedObject private var touchControls = TouchControlsModel.shared
 
@@ -1530,7 +1527,7 @@ struct ContentView: View {
 
         // Start a main thread heartbeat to diagnose hang
         var heartbeatCount = 0
-        let heartbeat = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+        launchHeartbeat = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
             heartbeatCount += 1
             os_log("[HEARTBEAT] main thread alive #%d", heartbeatCount)
         }
@@ -1547,7 +1544,8 @@ struct ContentView: View {
             // Step 1: Allocate JIT pool (BRK suspends entire process)
             defer {
                 DispatchQueue.main.async {
-                    heartbeat.invalidate()
+                    launchHeartbeat?.invalidate()
+                    launchHeartbeat = nil
                     logStore.uiPaused = false
                     sessionPreparing = false
                     ws_log_quiet = 0
@@ -2038,7 +2036,7 @@ struct ContentView: View {
             logStore.log("Detaching debugger...")
             StikJITHelper.detachDebugger()
 
-            DispatchQueue.main.async { heartbeat.invalidate() }
+            DispatchQueue.main.async { launchHeartbeat?.invalidate(); launchHeartbeat = nil }
         }
     }
 
@@ -2580,18 +2578,12 @@ struct TouchControlsOverlay: View {
     }
 }
 
-/// Shared glass backing, with the pre-26 fallback the codebase already uses.
+/// Shared control backing, available on every supported iOS version.
 struct GlassShape: View {
     var circle = false
     var body: some View {
-        if #available(iOS 26.0, *) {
-            if circle { Circle().fill(.clear).glassEffect(.regular, in: Circle()) }
-            else { RoundedRectangle(cornerRadius: 18).fill(.clear)
-                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18)) }
-        } else {
-            if circle { Circle().fill(.ultraThinMaterial) }
-            else { RoundedRectangle(cornerRadius: 18).fill(.ultraThinMaterial) }
-        }
+        if circle { Circle().fill(.ultraThinMaterial) }
+        else { RoundedRectangle(cornerRadius: 18).fill(.ultraThinMaterial) }
     }
 }
 

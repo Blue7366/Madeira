@@ -143,6 +143,7 @@ struct LibraryHome: View {
         .foregroundColor(.white)
         .tint(MadeiraTheme.accent)
         .preferredColorScheme(.dark)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in library.refreshFiles() }
         .sheet(item: $selectedGame) { game in
             GameDetailView(library: library, game: game, sessionBusy: sessionBusy) {
                 selectedGame = nil
@@ -371,7 +372,7 @@ private struct GameDetailView: View {
                         Text(game.subtitle).foregroundColor(MadeiraTheme.muted)
                     }
                     HStack {
-                        Button(action: play) { Label(sessionBusy ? "Open session" : "Play", systemImage: "play.fill") }
+                        Button(action: play) { Label("Play", systemImage: "play.fill") }
                             .buttonStyle(LibraryButtonStyle(primary: true)).disabled(!library.isInstalled(game))
                         Button { library.toggleFavorite(game) } label: {
                             Image(systemName: library.games.first(where: { $0.id == game.id })?.favorite == true ? "heart.fill" : "heart")
