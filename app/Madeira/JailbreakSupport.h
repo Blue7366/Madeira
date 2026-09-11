@@ -12,6 +12,7 @@ extern "C" {
 // process hooks plus the iOS memorystatus API to prepare Madeira for FEX.
 bool madeira_jb_is_jailbroken(void);
 bool madeira_jb_is_debugged(void);
+bool madeira_jb_jit_available(void);
 bool madeira_jb_enable_jit(void);
 bool madeira_jb_increase_memory_limit(void);
 bool madeira_jb_initialize(void);

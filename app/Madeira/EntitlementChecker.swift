@@ -44,7 +44,7 @@ struct EntitlementStatus {
             increasedMemory: checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit"),
             extendedVA: checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing"),
             jailbroken: jailbroken,
-            automaticJIT: jailbroken && madeira_jb_is_debugged(),
+            automaticJIT: jailbroken && madeira_jb_jit_available(),
             automaticMemory: jailbroken && madeira_jb_increase_memory_limit()
         )
     }

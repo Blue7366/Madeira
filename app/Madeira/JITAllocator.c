@@ -1,4 +1,5 @@
 #include "JITAllocator.h"
+#include "JailbreakSupport.h"
 
 #include <mach/mach.h>
 #include <mach/vm_map.h>
@@ -457,7 +458,11 @@ bool jit_check_debugged(void) {
     }
     bool debugged = (flags & CS_DEBUGGED) != 0;
     jit_log("CS_DEBUGGED flag: %s (flags=0x%x)", debugged ? "SET" : "NOT SET", flags);
-    return debugged;
+    if (debugged) return true;
+    // Some rootless jailbreak hooks deliberately hide CS_DEBUGGED from
+    // userland status queries after arming the process. Preserve the positive
+    // result from the jailbreak self-debug path in that case.
+    return madeira_jb_jit_available();
 }
 
 bool jit_test_mapping(void) {

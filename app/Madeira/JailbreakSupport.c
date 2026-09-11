@@ -58,6 +58,7 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_jailbreak = -1;
 static bool g_ptrace_attempted = false;
 static bool g_exception_handler_installed = false;
+static bool g_jit_armed = false;
 
 static void jb_log(const char *message) {
     fprintf(stderr, "[Jailbreak] %s\n", message);
@@ -114,6 +115,19 @@ bool madeira_jb_is_debugged(void) {
     uint32_t flags = 0;
     return csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) == 0 &&
            (flags & CS_DEBUGGED) != 0;
+#endif
+}
+
+bool madeira_jb_jit_available(void) {
+#if TARGET_OS_OSX || TARGET_OS_SIMULATOR
+    return false;
+#else
+    if (!madeira_jb_is_jailbroken()) return false;
+    if (madeira_jb_is_debugged()) return true;
+    pthread_mutex_lock(&g_lock);
+    bool armed = g_jit_armed;
+    pthread_mutex_unlock(&g_lock);
+    return armed;
 #endif
 }
 
@@ -199,8 +213,9 @@ bool madeira_jb_enable_jit(void) {
                                           "jbclient_platform_set_process_debugged");
     if (set_debugged) {
         int result = set_debugged(getpid(), true);
-        if (result == 0 && madeira_jb_is_debugged()) {
-            jb_log("jailbreak process API enabled CS_DEBUGGED");
+        if (result == 0) {
+            g_jit_armed = true;
+            jb_log("jailbreak process API armed JIT");
             pthread_mutex_unlock(&g_lock);
             return true;
         }
@@ -221,10 +236,11 @@ bool madeira_jb_enable_jit(void) {
         // this self-trace, otherwise an unexpected fault can hang the task.
         ptrace(PT_SIGEXC, 0, NULL, 0);
         install_ptrace_safety_net();
+        g_jit_armed = true;
         jb_log("self-debug JIT path armed");
     }
 
-    bool enabled = madeira_jb_is_debugged();
+    bool enabled = madeira_jb_is_debugged() || g_jit_armed;
     pthread_mutex_unlock(&g_lock);
     return enabled;
 #endif

@@ -50,7 +50,7 @@ enum StikJITHelper {
     static func enableJIT(completion: @escaping (Bool) -> Void) {
         if usesJailbreakSupport {
             madeira_jb_initialize()
-            let enabled = madeira_jb_is_debugged()
+            let enabled = madeira_jb_jit_available()
             let memory = madeira_jb_increase_memory_limit()
             LogStore.shared.log(
                 "Jailbreak support: JIT \(enabled ? "enabled" : "not enabled"), memory limit \(memory ? "raised" : "unchanged")",
