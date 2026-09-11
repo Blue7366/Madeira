@@ -134,7 +134,7 @@ final class GameLibrary: ObservableObject {
         }
         var executables: [String] = []
         var enumerationError: Error?
-        guard let walker = fm.enumerator(at: source, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+        guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                                        options: [.skipsHiddenFiles], errorHandler: { _, error in
             enumerationError = error
             return false
@@ -143,7 +143,9 @@ final class GameLibrary: ObservableObject {
             let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             if values.isSymbolicLink == true { throw LibraryImportError.symbolicLink }
             if file.pathExtension.lowercased() == "exe", values.isRegularFile == true {
-                executables.append(String(file.path.dropFirst(source.path.count + 1)))
+                let path = file.standardizedFileURL.resolvingSymlinksInPath().path
+                guard path.hasPrefix(root.path + "/") else { throw LibraryImportError.unreadable }
+                executables.append(String(path.dropFirst(root.path.count + 1)))
             }
         }
         if let error = enumerationError { throw error }

@@ -84,6 +84,7 @@ enum LibrarySection: String, CaseIterable, Identifiable {
 }
 
 struct LibraryHome: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @ObservedObject var library: GameLibrary
     let entitlements: EntitlementStatus?
     let jitReady: Bool
@@ -260,7 +261,7 @@ struct LibraryHome: View {
             }
             .frame(maxWidth: .infinity).padding(.vertical, 55)
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 290), spacing: 20)], alignment: .leading, spacing: 24) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .compact ? 145 : 180, maximum: 290), spacing: 20)], alignment: .leading, spacing: 24) {
                 ForEach(visibleGames) { game in
                     GameCard(game: game, installed: library.isInstalled(game), select: { selectedGame = game }, favorite: { library.toggleFavorite(game) })
                 }
