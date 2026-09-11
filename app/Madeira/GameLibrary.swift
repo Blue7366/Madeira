@@ -96,7 +96,7 @@ final class GameLibrary: ObservableObject {
         let path = executable.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, path.lowercased().hasSuffix(".exe"),
               let url = localURL(for: path), FileManager.default.fileExists(atPath: url.path) else {
-            errorMessage = "Choose an existing .exe inside Madeira's C drive, or import its game folder first."
+            errorMessage = "Select an .exe or import its game folder first. The shortcut must point to a file in Madeira's C drive."
             return false
         }
         let game = LibraryGame(id: UUID().uuidString, title: name, subtitle: "Windows game", symbol: "gamecontroller.fill",
@@ -119,6 +119,28 @@ final class GameLibrary: ObservableObject {
             errorMessage = "Could not save the library: \(error.localizedDescription)"
             return false
         }
+    }
+
+    /// Link to files already in the C drive. External selections grant access
+    /// to that file only, so copy standalone executables without assuming we
+    /// can read their sibling DLLs/assets. Folder import handles those games.
+    static func importExecutable(_ source: URL, into driveC: URL) throws -> String {
+        let access = source.startAccessingSecurityScopedResource()
+        defer { if access { source.stopAccessingSecurityScopedResource() } }
+        let file = source.standardizedFileURL.resolvingSymlinksInPath()
+        guard file.pathExtension.lowercased() == "exe",
+              try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw LibraryImportError.notExecutable
+        }
+        let root = driveC.standardizedFileURL.resolvingSymlinksInPath()
+        if file.path.hasPrefix(root.path + "/") {
+            return "C:/\(file.path.dropFirst(root.path.count + 1))".replacingOccurrences(of: "/", with: "\\")
+        }
+        let relative = "Games/\(UUID().uuidString)/\(file.lastPathComponent)"
+        let target = driveC.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: file, to: target)
+        return "C:/\(relative)".replacingOccurrences(of: "/", with: "\\")
     }
 
     /// Copy the whole folder so DLLs and assets stay beside the executable.
@@ -159,10 +181,11 @@ final class GameLibrary: ObservableObject {
 }
 
 enum LibraryImportError: LocalizedError {
-    case noExecutable, unreadable, containsDestination, symbolicLink
+    case noExecutable, notExecutable, unreadable, containsDestination, symbolicLink
     var errorDescription: String? {
         switch self {
         case .noExecutable: return "This folder has no Windows .exe files. Choose the folder containing the installed game."
+        case .notExecutable: return "Select a Windows .exe file. To add a whole game folder, use Import game folder."
         case .unreadable: return "This folder could not be opened. Download it locally in Files and try again."
         case .containsDestination: return "Choose an individual game folder, not Madeira's Documents or C drive."
         case .symbolicLink: return "This folder contains symbolic links. Import a folder with the actual game files instead."

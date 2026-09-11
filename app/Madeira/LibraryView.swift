@@ -401,38 +401,84 @@ private struct GameDetailView: View {
     }
 }
 
+private enum GamePickerMode: String, Identifiable {
+    case executable, folder
+    var id: String { rawValue }
+}
+
+/// Present Files directly so Open and Cancel always reach our own delegate.
+/// A fresh controller per mode keeps folder/executable filters independent.
+private struct GameFilePicker: UIViewControllerRepresentable {
+    let mode: GamePickerMode
+    let directory: URL
+    let selected: (URL?) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(selected: selected) }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        // .item also permits executables whose provider has no specific UTType.
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: mode == .folder ? [.folder] : [.item], asCopy: false)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        if FileManager.default.fileExists(atPath: directory.path) { picker.directoryURL = directory }
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let selected: (URL?) -> Void
+        init(selected: @escaping (URL?) -> Void) { self.selected = selected }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            selected(urls.first)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { selected(nil) }
+    }
+}
+
 private struct AddGameView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var library: GameLibrary
     @State private var title = ""
     @State private var executable = ""
     @State private var arguments = ""
-    @State private var choosingFolder = false
+    @State private var activePicker: GamePickerMode?
+    @State private var importingFolder = false
     @State private var importing = false
     @State private var candidates: [String] = []
     @State private var error: String?
+    @State private var selectionNote: String?
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     Label("Bring your next adventure.", systemImage: "gamecontroller").font(.title3.weight(.semibold)).padding(.vertical, 8)
-                    Text("Choose the installed game's entire folder so its assets and DLLs come along. Games are copied into Madeira's C drive.")
+                    Text("Select a Windows .exe to add it. If the game needs DLLs or other assets, import its entire folder first, then choose the executable.")
                         .font(.subheadline).foregroundColor(MadeiraTheme.muted)
-                    Button { choosingFolder = true } label: {
-                        HStack { Label("Import game folder", systemImage: "folder.badge.plus"); Spacer(); if importing { ProgressView() } }
+                    Button { activePicker = .executable } label: {
+                        HStack { Label("Select executable (.exe)", systemImage: "doc.badge.plus"); Spacer(); if importing && !importingFolder { ProgressView() } }
+                    }.disabled(importing)
+                    Button { activePicker = .folder } label: {
+                        HStack { Label("Import game folder", systemImage: "folder.badge.plus"); Spacer(); if importing && importingFolder { ProgressView() } }
                     }.disabled(importing)
                 }
                 Section {
                     TextField("Game name", text: $title)
                     if candidates.count > 1 {
                         Picker("Executable", selection: $executable) {
-                            ForEach(candidates, id: \.self) { path in Text(path.components(separatedBy: "\\").last ?? path).tag(path) }
+                            Text("Choose an .exe…").tag("")
+                            ForEach(candidates, id: \.self) { path in
+                                Text(path.components(separatedBy: "\\").dropFirst(3).joined(separator: "\\")).tag(path)
+                            }
                         }
+                        .pickerStyle(.navigationLink)
                     }
+                    if let selectionNote { Text(selectionNote).font(.caption).foregroundColor(MadeiraTheme.muted) }
                     TextField("C:\\Games\\MyGame\\game.exe", text: $executable).autocorrectionDisabled().textInputAutocapitalization(.never)
                     TextField("Launch arguments (optional)", text: $arguments).autocorrectionDisabled().textInputAutocapitalization(.never)
                 } header: { Text("Shortcut") } footer: {
-                    Text("Already copied your files? Enter the executable's C-drive path. If you import a folder and cancel, its files remain in C:\\Games for later use.")
+                    Text("Executables already in Madeira's C drive are linked in place with their game files. External executables are copied individually. Imported files stay in C:\\Games if you cancel.")
                 }
                 if let error { Section { Text(error).foregroundColor(.orange) } }
             }
@@ -447,29 +493,48 @@ private struct AddGameView: View {
                     }.disabled(importing || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || executable.isEmpty)
                 }
             }
-            .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
-                switch result {
-                case .failure(let failure): error = failure.localizedDescription
-                case .success(let url):
-                    importing = true
-                    error = nil
-                    let destination = library.driveC
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        let imported = Result { try GameLibrary.importFolder(url, into: destination) }
-                        DispatchQueue.main.async {
-                            importing = false
-                            switch imported {
-                            case .success(let paths):
-                                candidates = paths; executable = paths.first ?? ""
-                                if title.isEmpty { title = url.lastPathComponent }
-                            case .failure(let failure): error = failure.localizedDescription
-                            }
-                        }
-                    }
+            .sheet(item: $activePicker) { mode in
+                GameFilePicker(mode: mode, directory: library.driveC) { url in
+                    activePicker = nil
+                    if let url { beginImport(url, folder: mode == .folder) }
                 }
             }
             .interactiveDismissDisabled(importing)
         }.preferredColorScheme(.dark).tint(MadeiraTheme.accent)
+    }
+
+    private func beginImport(_ url: URL, folder: Bool) {
+        // Take scoped access in the selection callback, before Files dismisses.
+        let access = url.startAccessingSecurityScopedResource()
+        importing = true
+        importingFolder = folder
+        error = nil
+        candidates = []
+        executable = ""
+        selectionNote = "Selected: \(url.lastPathComponent). \(folder ? "Reading and importing game files…" : "Adding executable…")"
+        if title.isEmpty { title = folder ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent }
+        let destination = library.driveC
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            let imported = Result {
+                if folder { return try GameLibrary.importFolder(url, into: destination) }
+                return [try GameLibrary.importExecutable(url, into: destination)]
+            }
+            DispatchQueue.main.async {
+                importing = false
+                switch imported {
+                case .success(let paths):
+                    candidates = paths
+                    executable = paths.count == 1 ? paths[0] : ""
+                    selectionNote = folder
+                        ? (paths.count > 1 ? "Folder imported. Tap Executable to choose which .exe to launch." : "Folder imported with its game files.")
+                        : "Executable selected. Files already in Madeira are linked in place; external .exe files are copied individually."
+                case .failure(let failure):
+                    selectionNote = "Selected: \(url.lastPathComponent). Import could not finish."
+                    error = failure.localizedDescription
+                }
+            }
+        }
     }
 }
 

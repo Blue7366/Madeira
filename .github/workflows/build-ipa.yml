@@ -2,6 +2,11 @@ name: Build Madeira IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run PMR regression tests before building
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -40,6 +45,7 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
       - name: Test PMR backport
+        if: ${{ inputs.run_tests }}
         run: |
           set -euo pipefail
           TEST_BIN="$RUNNER_TEMP/pmr-compat-test"
