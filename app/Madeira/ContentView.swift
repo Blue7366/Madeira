@@ -851,6 +851,8 @@ struct ContentView: View {
     @State private var debuggerAttached = isDebuggerAttached()
     @ObservedObject private var input = InputSettings.shared
     @State private var pointerPanel = false
+    @State private var showingSetupGuide = false
+    @State private var showingLogs = false
     @Namespace private var pointerNS
     /// .compact = iPhone landscape: game surface expands, arrow keys appear.
     @Environment(\.verticalSizeClass) private var vSizeClass
@@ -885,81 +887,168 @@ struct ContentView: View {
             // a fresh placeholder only re-parents the same CAMetalLayer.
             .navigationTitle("Madeira")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarHidden(vSizeClass == .compact)
+            .navigationBarHidden(true)
+            .tint(.cyan)
+            .preferredColorScheme(.dark)
             .onAppear {
                 jit_install_trap_handler()
                 entitlements = EntitlementStatus.check()
                 logEntitlementStatus()
             }
+            .sheet(isPresented: $showingSetupGuide) {
+                SetupGuideView()
+            }
         }
     }
 
-    /// Portrait: classic tooling layout — header, badges, 240pt game strip,
-    /// key row, action buttons, log console.
+    /// Portrait dashboard. The emulator surface remains the visual anchor;
+    /// setup, launch actions, and diagnostics are grouped around it instead
+    /// of competing in one long horizontal toolbar.
     private var portraitBody: some View {
-        VStack(spacing: 0) {
-            // Readouts sit ABOVE the game strip, closest to the surface they
-            // describe: entitlement indicators, then the present/FPS readout,
-            // then the surface itself. (Only the KEY row stays below — it is
-            // input, not instrumentation.)
-            //
-            // NOTE: the surface is a raw window-level view positioned over the
-            // placeholder (MetalHostView.shared), so SwiftUI content laid "on
-            // top" of the strip is covered — these rows must be siblings above
-            // it, never overlays on it.
-            if let ents = entitlements {
-                entitlementBadges(ents)
+        ScrollView(.vertical, showsIndicators: false) {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                dashboardHeader
+                if let ents = entitlements {
+                    entitlementBadges(ents)
+                }
+                gameSurfaceCard
+                quickControls
+                actionButtons
+                diagnosticsPanel
             }
-            HStack(spacing: 6) {
-                FPSOverlay()
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 28)
+        }
+        .background(Color(red: 0.035, green: 0.045, blue: 0.065).ignoresSafeArea())
+    }
+
+    private var dashboardHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Madeira")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Windows on iPad")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            Spacer(minLength: 12)
+            HStack(spacing: 8) {
+                dashboardIconButton("book.closed", label: "Setup guide") {
+                    showingSetupGuide = true
+                }
+                dashboardIconButton(showingLogs ? "xmark" : "terminal", label: "Toggle logs") {
+                    withAnimation(.easeInOut(duration: 0.2)) { showingLogs.toggle() }
+                }
+            }
+        }
+    }
+
+    private func dashboardIconButton(_ systemName: String, label: String,
+                                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 42, height: 42)
+                .foregroundColor(.white)
+                .background(Color.white.opacity(0.09))
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private var gameSurfaceCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Emulator surface")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Touch the screen to interact with Windows")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.48))
+                }
                 Spacer()
+                FPSOverlay()
             }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 4)
+
+            // The SwiftUI view is a geometry/input placeholder. The actual
+            // CAMetalLayer is still hosted at window level, so instrumentation
+            // stays above this sibling rather than being hidden by the layer.
             MadeiraMetalView()
-                .frame(height: 240)
+                .frame(height: 260)
                 .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                }
                 .onAppear { TouchControlsHost.attach() }
                 .onReceive(NotificationCenter.default.publisher(
                     for: UIDevice.orientationDidChangeNotification)) { _ in
-                    TouchControlsHost.attach()   // re-frame to the new bounds
+                    TouchControlsHost.attach()
                 }
-            HStack(spacing: 6) {
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+        }
+    }
+
+    private var quickControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Controls")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                Text(pointerPanel ? "Pointer settings" : "Touch + keyboard")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.45))
+            }
+
+            HStack(spacing: 8) {
                 if pointerPanel {
-                    // The cursor button has slid to the leftmost slot and become
-                    // the close control; matchedGeometryEffect animates the slide.
                     pointerToggleButton
                     pointerModeToggle
                     pointerSensSlider
                 } else {
-                    Group {
-                        keyButton("⏎", vk: 0x0D)   // VK_RETURN
-                        keyButton("␣", vk: 0x20)   // VK_SPACE
-                        keyButton("Esc", vk: 0x1B) // VK_ESCAPE
-                        Button { MetalBackedView.toggleKeyboard() } label: {
-                            Text("⌨").font(.system(size: 20))
-                                .frame(minWidth: 40, minHeight: 32)
-                                .background(Color.secondary.opacity(0.25))
-                                .cornerRadius(6)
-                        }
-                        JoystickKeyView()
+                    keyButton("⏎", vk: 0x0D)
+                    keyButton("␣", vk: 0x20)
+                    keyButton("Esc", vk: 0x1B)
+                    Button { MetalBackedView.toggleKeyboard() } label: {
+                        Image(systemName: "keyboard")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 40, height: 34)
+                            .foregroundColor(.white)
+                            .background(Color.white.opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
-                    .transition(.opacity)
+                    .buttonStyle(.plain)
+                    JoystickKeyView()
                     pointerToggleButton
                     diagToggleButton
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            // The expanded pad overflows this row; without a raised zIndex the
-            // later VStack siblings (action buttons, log) would draw over it.
-            .zIndex(10)
-            Divider()
-            actionButtons
-            Divider()
-            logConsole
         }
+        .padding(14)
+        .background(Color.white.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+        }
+        .zIndex(10)
     }
 
     /// Landscape: game mode. Full-height 4:3 surface centered (aspect-fit
@@ -1077,27 +1166,42 @@ struct ContentView: View {
     }
 
     private func entitlementBadges(_ ents: EntitlementStatus) -> some View {
-        HStack(spacing: 8) {
-            // Live debugger/JIT state, not the (macOS-only, never granted on
-            // iOS) allow-jit entitlement the old badge checked.
-            entitlementBadge("JIT", granted: debuggerAttached || ents.automaticJIT)
-            entitlementBadge("Memory+", granted: ents.increasedMemory || ents.automaticMemory)
-            entitlementBadge("64-bit VA", granted: ents.extendedVA)
-            Spacer()
-            // Device model rides in this row (the old standalone statusHeader
-            // row above it spent ~50pt of vertical space on nothing else).
-            VStack(alignment: .trailing, spacing: 0) {
-                Text("Device")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Runtime status")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text(ents.jailbroken ? "Jailbreak support detected" : "Standard app environment")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.48))
+                }
+                Spacer()
                 Text(deviceInfo)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.42))
+            }
+            HStack(spacing: 8) {
+                // Live debugger/JIT state, not the iOS allow-jit entitlement.
+                entitlementBadge("JIT", granted: debuggerAttached || ents.automaticJIT)
+                entitlementBadge("Memory+", granted: ents.increasedMemory || ents.automaticMemory)
+                entitlementBadge("64-bit VA", granted: ents.extendedVA)
+                Spacer(minLength: 0)
+            }
+            if ents.jailbroken && (!ents.automaticMemory || !ents.extendedVA) {
+                Text("JIT is ready. Memory capabilities depend on the entitlements preserved by your installer.")
+                    .font(.caption)
+                    .foregroundColor(.yellow.opacity(0.80))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 4)
-        .padding(.bottom, 8)
+        .padding(14)
+        .background(Color.white.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+        }
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
             debuggerAttached = isDebuggerAttached()
         }
@@ -1120,6 +1224,38 @@ struct ContentView: View {
         )
     }
 
+    private var diagnosticsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Diagnostics")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text(showingLogs ? "Live runtime output" : "Logs are hidden until you need them")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.45))
+                }
+                Spacer()
+                Button(showingLogs ? "Hide" : "Show") {
+                    withAnimation(.easeInOut(duration: 0.2)) { showingLogs.toggle() }
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+            }
+            if showingLogs {
+                logConsole
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+        }
+    }
+
     private func logEntitlementStatus() {
         guard let ents = entitlements else { return }
         logStore.log("Checking entitlements...")
@@ -1137,8 +1273,22 @@ struct ContentView: View {
     }
 
     private var actionButtons: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Launch")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Choose a bundled test or Windows environment")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.45))
+                }
+                Spacer()
+            }
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 10),
+                GridItem(.flexible(), spacing: 10)
+            ], spacing: 10) {
                 Button("Enable JIT") {
                     enableJITViaStikDebug()
                 }
@@ -1519,7 +1669,13 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .tint(.red)
             }
-            .padding()
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
         }
     }
 
@@ -1534,37 +1690,41 @@ struct ContentView: View {
 
     private var logConsole: some View {
         let entries = logStore.entries.sorted(by: { $0.lastTimestamp > $1.lastTimestamp })
-        return List(entries) { entry in
-            HStack(alignment: .top, spacing: 8) {
-                // Timestamp of LAST occurrence
-                Text(timeString(entry.lastTimestamp))
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .frame(width: 64, alignment: .leading)
-                // Level chip
-                Text(entry.level.rawValue)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundColor(colorForLevel(entry.level))
-                    .frame(width: 28, alignment: .leading)
-                // Last raw message (the most recent line that matched this signature)
-                Text(entry.lastRaw)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-                // Count badge (only if count > 1)
-                if entry.count > 1 {
-                    Text("×\(entry.count)")
-                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.2))
-                        .cornerRadius(4)
-                        .foregroundColor(.secondary)
+        return ScrollView(.vertical, showsIndicators: false) {
+            LazyVStack(alignment: .leading, spacing: 6) {
+                ForEach(entries) { entry in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(timeString(entry.lastTimestamp))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.40))
+                            .frame(width: 58, alignment: .leading)
+                        Text(entry.level.rawValue)
+                            .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                            .foregroundColor(colorForLevel(entry.level))
+                            .frame(width: 32, alignment: .leading)
+                        Text(entry.lastRaw)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.82))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        if entry.count > 1 {
+                            Text("×\(entry.count)")
+                                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                                .foregroundColor(.white.opacity(0.48))
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.black.opacity(0.20))
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
             }
-            .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+            .padding(2)
         }
-        .listStyle(.plain)
+        .frame(maxHeight: 240)
+        .background(Color.black.opacity(0.16))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // ml540: ONE formatter for the whole app, built once on first use.
