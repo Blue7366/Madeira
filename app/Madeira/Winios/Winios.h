@@ -48,6 +48,8 @@ void winios_post_key(int vk, int down);
  * Safe to call before or after the compositor exists; main-thread
  * dispatch inside. */
 void winios_set_compositor_frame(double x, double y, double w, double h);
+/* Library navigation hides presentation without destroying the desktop. */
+void winios_set_compositor_visible(int visible);
 
 /* S2 trackpad pointer. (x, y) are ABSOLUTE wine-desktop pixels (the
  * Swift trackpad engine owns the cursor position); flags are raw

@@ -601,6 +601,16 @@ static CGFloat g_px_to_pt = 1.0 / 3.0;   /* desktop px → screen pt */
 static CGPoint g_desk_origin;            /* desktop (0,0) in view pt (letterbox offset) */
 static CGRect g_comp_frame;              /* presentation area (window coords), from Swift */
 static BOOL g_comp_frame_set;
+static BOOL g_comp_visible = NO;
+
+void winios_set_compositor_visible(int visible) {
+    void (^update)(void) = ^{
+        g_comp_visible = visible != 0;
+        g_compositor_view.hidden = !g_comp_visible;
+    };
+    if ([NSThread isMainThread]) update();
+    else dispatch_async(dispatch_get_main_queue(), update);
+}
 
 static CGRect winios_layer_rect(int x, int y, int w, int h) {
     CGFloat s = g_px_to_pt;
@@ -670,6 +680,7 @@ static void winios_ensure_compositor(void) {
     g_px_rects = [NSMutableDictionary new];
     g_surf_sizes = [NSMutableDictionary new];
     g_compositor_view = [[UIView alloc] initWithFrame:win.bounds];
+    g_compositor_view.hidden = !g_comp_visible;
     g_compositor_view.userInteractionEnabled = NO;  /* touches fall through */
     g_compositor_view.clipsToBounds = YES;
     /* letterbox area: near-black; desktop area: classic teal (until
