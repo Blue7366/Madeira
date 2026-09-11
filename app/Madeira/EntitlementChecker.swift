@@ -39,7 +39,7 @@ struct EntitlementStatus {
 
     static func check() -> EntitlementStatus {
         let jailbroken = madeira_jb_is_jailbroken()
-        EntitlementStatus(
+        return EntitlementStatus(
             jitAllowed: checkAppEntitlement("com.apple.security.cs.allow-jit"),
             increasedMemory: checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit"),
             extendedVA: checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing"),
