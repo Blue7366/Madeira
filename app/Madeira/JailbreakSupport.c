@@ -51,6 +51,7 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 extern int ptrace(int request, pid_t pid, caddr_t addr, int data);
 extern int memorystatus_control(uint32_t command, int32_t pid, uint32_t flags,
                                 user_addr_t buffer, size_t buffersize);
+extern boolean_t exc_server(mach_msg_header_t *, mach_msg_header_t *);
 
 typedef int (*jb_set_process_debugged_fn)(pid_t pid, bool debugged);
 
