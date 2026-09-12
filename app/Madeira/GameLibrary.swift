@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 struct LibraryGame: Identifiable, Codable, Equatable {
-    enum LaunchKind: String, Codable { case steam, stray, thumper, desktop, cube, clock, triangle, custom }
+    enum LaunchKind: String, Codable { case steam, stray, thumper, hollowKnight, desktop, cube, clock, triangle, custom }
     var id: String
     var title: String
     var subtitle: String
@@ -21,7 +21,20 @@ struct LibraryGame: Identifiable, Codable, Equatable {
         .init(id: "stray", title: "Stray", subtitle: "Explore the unknown", symbol: "pawprint.fill", palette: 1,
               kind: .stray, executable: "C:\\Program Files\\Stray\\Hk_project\\Binaries\\Win64\\Stray-Win64-Shipping.exe"),
         .init(id: "thumper", title: "Thumper", subtitle: "Feel the rhythm", symbol: "waveform.path", palette: 2,
-              kind: .thumper, executable: "C:\\Program Files\\Thumper\\THUMPER_win10.exe")
+              kind: .thumper, executable: "C:\\Program Files\\Thumper\\THUMPER_win10.exe"),
+        .init(id: "hollow-knight", title: "Hollow Knight", subtitle: "Works well on Madeira", symbol: "sparkles", palette: 3,
+              kind: .hollowKnight, executable: "C:\\Program Files\\Hollow Knight\\hollow_knight.exe")
+    ]
+
+    static let supportedCatalog: [LibraryGame] = [
+        .init(id: "steam", title: "Steam", subtitle: "Known-good launcher", symbol: "gearshape.2.fill", palette: 0,
+              kind: .steam, executable: "C:\\Program Files (x86)\\Steam\\steam.exe"),
+        .init(id: "stray", title: "Stray", subtitle: "Works well", symbol: "pawprint.fill", palette: 1,
+              kind: .stray, executable: "C:\\Program Files\\Stray\\Hk_project\\Binaries\\Win64\\Stray-Win64-Shipping.exe"),
+        .init(id: "thumper", title: "Thumper", subtitle: "Playable rhythm game", symbol: "waveform.path", palette: 2,
+              kind: .thumper, executable: "C:\\Program Files\\Thumper\\THUMPER_win10.exe"),
+        .init(id: "hollow-knight", title: "Hollow Knight", subtitle: "Works on Madeira", symbol: "sparkles", palette: 3,
+              kind: .hollowKnight, executable: "C:\\Program Files\\Hollow Knight\\hollow_knight.exe")
     ]
 
     static let tools: [LibraryGame] = [
@@ -93,6 +106,12 @@ final class GameLibrary: ObservableObject {
         var updated = games
         updated[index].iconData = iconData
         save(updated)
+    }
+
+    @discardableResult
+    func addSupported(_ game: LibraryGame) -> Bool {
+        if games.contains(where: { $0.id == game.id }) { return true }
+        return save(games + [game])
     }
 
     @discardableResult

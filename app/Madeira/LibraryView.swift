@@ -81,12 +81,13 @@ struct GameArtwork: View {
 }
 
 enum LibrarySection: String, CaseIterable, Identifiable {
-    case library = "Library", favorites = "Favorites", tools = "Tools", settings = "Settings"
+    case library = "Library", favorites = "Favorites", supported = "Supported", tools = "Tools", settings = "Settings"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .library: return "square.grid.2x2"
         case .favorites: return "heart"
+        case .supported: return "sparkles"
         case .tools: return "display"
         case .settings: return "slider.horizontal.3"
         }
@@ -134,6 +135,7 @@ struct LibraryHome: View {
                             if let game = activeGame, sessionBusy { resumeBanner(game) }
                             switch section {
                             case .library, .favorites: libraryContent
+                            case .supported: supportedContent
                             case .tools: toolsContent
                             case .settings:
                                 LibrarySettings(entitlements: entitlements, jitReady: jitReady,
@@ -205,6 +207,7 @@ struct LibraryHome: View {
                 Text(item.rawValue).font(.subheadline.weight(.semibold))
                 Spacer()
                 if item == .library { Text("\(library.games.count)").font(.caption.monospacedDigit()) }
+                if item == .supported { Text("\(LibraryGame.supportedCatalog.count)").font(.caption.monospacedDigit()) }
             }
             .padding(13)
             .foregroundColor(section == item ? MadeiraTheme.accent : MadeiraTheme.muted)
@@ -309,6 +312,36 @@ struct LibraryHome: View {
             }
             .padding(18).background(MadeiraTheme.accent.opacity(0.08)).cornerRadius(16)
         }.buttonStyle(.plain)
+    }
+
+    private var supportedContent: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Text("Known-good presets for Madeira. Pick one to add it to your library.").foregroundColor(MadeiraTheme.muted)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) {
+                ForEach(LibraryGame.supportedCatalog) { game in
+                    let inLibrary = library.games.contains(where: { $0.id == game.id })
+                    Button {
+                        if inLibrary { if let existing = library.games.first(where: { $0.id == game.id }) { selectedGame = existing } }
+                        else { _ = library.addSupported(game) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack(alignment: .center, spacing: 12) {
+                                GameArtwork(game: game).frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12))
+                                VStack(alignment: .leading) {
+                                    Text(game.title).font(.headline)
+                                    Text(game.subtitle).font(.caption).foregroundColor(MadeiraTheme.muted)
+                                }
+                            }
+                            HStack {
+                                Spacer()
+                                Text(inLibrary ? "In library" : "Add to library").font(.caption.weight(.semibold)).foregroundColor(inLibrary ? MadeiraTheme.accent : .white)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(18).background(MadeiraTheme.panel).cornerRadius(18)
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private var toolsContent: some View {
