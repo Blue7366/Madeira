@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import PhotosUI
 import UniformTypeIdentifiers
 
 enum MadeiraTheme {
@@ -35,33 +37,41 @@ struct GameArtwork: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                LinearGradient(colors: MadeiraTheme.colors(game.palette), startPoint: .topLeading, endPoint: .bottomTrailing)
-                Canvas { context, size in
-                    let center = CGPoint(x: size.width * 0.70, y: size.height * 0.32)
-                    for index in 0..<5 {
-                        let radius = min(size.width, size.height) * (0.18 + Double(index) * 0.085)
-                        let circle = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
-                                                          width: radius * 2, height: radius * 2))
-                        context.stroke(circle, with: .color(.white.opacity(0.16 - Double(index) * 0.024)), lineWidth: 1)
+                if let imageData = game.iconData, let uiImage = UIImage(data: imageData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else {
+                    LinearGradient(colors: MadeiraTheme.colors(game.palette), startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Canvas { context, size in
+                        let center = CGPoint(x: size.width * 0.70, y: size.height * 0.32)
+                        for index in 0..<5 {
+                            let radius = min(size.width, size.height) * (0.18 + Double(index) * 0.085)
+                            let circle = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
+                                                              width: radius * 2, height: radius * 2))
+                            context.stroke(circle, with: .color(.white.opacity(0.16 - Double(index) * 0.024)), lineWidth: 1)
+                        }
+                        var horizon = Path()
+                        for index in 0..<12 {
+                            let x = CGFloat(index) * size.width / 8 - size.width / 4
+                            horizon.move(to: CGPoint(x: size.width * 0.62, y: size.height * 0.44))
+                            horizon.addLine(to: CGPoint(x: x, y: size.height))
+                        }
+                        for index in 0..<7 {
+                            let y = size.height * (0.5 + pow(Double(index) / 6, 2) * 0.5)
+                            horizon.move(to: CGPoint(x: 0, y: y))
+                            horizon.addLine(to: CGPoint(x: size.width, y: y))
+                        }
+                        context.stroke(horizon, with: .color(.white.opacity(0.08)), lineWidth: 1)
                     }
-                    var horizon = Path()
-                    for index in 0..<12 {
-                        let x = CGFloat(index) * size.width / 8 - size.width / 4
-                        horizon.move(to: CGPoint(x: size.width * 0.62, y: size.height * 0.44))
-                        horizon.addLine(to: CGPoint(x: x, y: size.height))
-                    }
-                    for index in 0..<7 {
-                        let y = size.height * (0.5 + pow(Double(index) / 6, 2) * 0.5)
-                        horizon.move(to: CGPoint(x: 0, y: y))
-                        horizon.addLine(to: CGPoint(x: size.width, y: y))
-                    }
-                    context.stroke(horizon, with: .color(.white.opacity(0.08)), lineWidth: 1)
+                    Image(systemName: game.symbol)
+                        .font(.system(size: min(geometry.size.width, geometry.size.height) * 0.30, weight: .ultraLight))
+                        .foregroundColor(.white.opacity(0.82))
+                        .rotationEffect(.degrees(-12))
+                        .offset(x: geometry.size.width * 0.10, y: -geometry.size.height * 0.07)
                 }
-                Image(systemName: game.symbol)
-                    .font(.system(size: min(geometry.size.width, geometry.size.height) * 0.30, weight: .ultraLight))
-                    .foregroundColor(.white.opacity(0.82))
-                    .rotationEffect(.degrees(-12))
-                    .offset(x: geometry.size.width * 0.10, y: -geometry.size.height * 0.07)
                 LinearGradient(colors: [.clear, .black.opacity(0.70)], startPoint: .center, endPoint: .bottom)
             }
         }
@@ -263,7 +273,7 @@ struct LibraryHome: View {
         } else {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .compact ? 145 : 180, maximum: 290), spacing: 20)], alignment: .leading, spacing: 24) {
                 ForEach(visibleGames) { game in
-                    GameCard(game: game, installed: library.isInstalled(game), select: { selectedGame = game }, favorite: { library.toggleFavorite(game) })
+                    GameCard(game: game, library: library, installed: library.isInstalled(game), select: { selectedGame = game }, favorite: { library.toggleFavorite(game) })
                 }
             }
         }
@@ -322,7 +332,9 @@ struct LibraryHome: View {
 }
 
 private struct GameCard: View {
+    @State private var editingIcon = false
     let game: LibraryGame
+    let library: GameLibrary
     let installed: Bool
     let select: () -> Void
     let favorite: () -> Void
@@ -339,11 +351,25 @@ private struct GameCard: View {
                     }
                     .frame(height: 235).clipShape(RoundedRectangle(cornerRadius: 18))
                 }.buttonStyle(.plain).accessibilityLabel("Open \(game.title)")
-                Button(action: favorite) {
-                    Image(systemName: game.favorite ? "heart.fill" : "heart")
-                        .foregroundColor(game.favorite ? MadeiraTheme.accent : .white)
-                        .frame(width: 44, height: 44).background(.black.opacity(0.25)).clipShape(Circle())
-                }.buttonStyle(.plain).padding(8).accessibilityLabel(game.favorite ? "Remove from favorites" : "Add to favorites")
+                HStack(spacing: 4) {
+                    Button { editingIcon = true } label: {
+                        Image(systemName: "photo.badge.plus")
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36).background(.black.opacity(0.25)).clipShape(Circle())
+                    }.buttonStyle(.plain).accessibilityLabel("Edit game icon")
+                    Button(action: favorite) {
+                        Image(systemName: game.favorite ? "heart.fill" : "heart")
+                            .foregroundColor(game.favorite ? MadeiraTheme.accent : .white)
+                            .frame(width: 36, height: 36).background(.black.opacity(0.25)).clipShape(Circle())
+                    }.buttonStyle(.plain).accessibilityLabel(game.favorite ? "Remove from favorites" : "Add to favorites")
+                }
+                .padding(8)
+                .sheet(isPresented: $editingIcon) {
+                    GameIconPicker { data in
+                        editingIcon = false
+                        if let data { library.updateGameIcon(game, iconData: data) }
+                    }
+                }
             }
             Button(action: select) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -363,6 +389,7 @@ private struct GameDetailView: View {
     let sessionBusy: Bool
     let play: () -> Void
     @State private var confirmingRemoval = false
+    @State private var editing = false
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -378,6 +405,8 @@ private struct GameDetailView: View {
                         Button { library.toggleFavorite(game) } label: {
                             Image(systemName: library.games.first(where: { $0.id == game.id })?.favorite == true ? "heart.fill" : "heart")
                         }.buttonStyle(LibraryButtonStyle()).accessibilityLabel("Toggle favorite")
+                        Button { editing = true } label: { Label("Edit", systemImage: "pencil") }
+                            .buttonStyle(LibraryButtonStyle())
                     }
                     if !library.isInstalled(game) {
                         Label("Game files needed", systemImage: "folder.badge.plus").font(.headline)
@@ -397,7 +426,139 @@ private struct GameDetailView: View {
             .confirmationDialog("Remove this shortcut? Game files will stay on your device.", isPresented: $confirmingRemoval, titleVisibility: .visible) {
                 Button("Remove shortcut", role: .destructive) { library.remove(game); dismiss() }
             }
+            .sheet(isPresented: $editing) {
+                EditGameView(library: library, game: game)
+            }
         }.preferredColorScheme(.dark).tint(MadeiraTheme.accent)
+    }
+}
+
+private struct EditGameView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var library: GameLibrary
+    let game: LibraryGame
+    @State private var title: String
+    @State private var executable: String
+    @State private var arguments: String
+    @State private var iconData: Data?
+    @State private var activePicker: GamePickerMode?
+    @State private var error: String?
+    @State private var editingIcon = false
+
+    init(library: GameLibrary, game: LibraryGame) {
+        self.library = library
+        self.game = game
+        _title = State(initialValue: game.title)
+        _executable = State(initialValue: game.executable)
+        _arguments = State(initialValue: game.arguments)
+        _iconData = State(initialValue: game.iconData)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Button { editingIcon = true } label: {
+                        HStack {
+                            GameArtwork(game: LibraryGame(id: game.id, title: title, subtitle: game.subtitle, symbol: game.symbol, palette: game.palette, kind: game.kind, executable: executable, arguments: arguments, iconData: iconData ?? game.iconData, favorite: game.favorite, lastPlayed: game.lastPlayed))
+                                .frame(width: 96, height: 96)
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Game cover").font(.headline)
+                                Text("Change from photo library").font(.caption).foregroundColor(MadeiraTheme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "photo.fill")
+                        }
+                    }.buttonStyle(.plain)
+                }
+                Section(header: Text("Basic details")) {
+                    TextField("Game name", text: $title)
+                    TextField("Executable path", text: $executable).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    TextField("Launch arguments", text: $arguments).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button { activePicker = .executable } label: {
+                        Label("Choose executable from Files", systemImage: "folder")
+                    }
+                }
+                if let error {
+                    Section {
+                        Text(error).foregroundColor(.orange)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden).background(MadeiraTheme.background)
+            .navigationTitle("Edit game")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        if library.update(game, title: title, executable: executable, arguments: arguments, iconData: iconData) {
+                            dismiss()
+                        } else {
+                            error = library.errorMessage
+                            library.errorMessage = nil
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $editingIcon) {
+                GameIconPicker { data in
+                    editingIcon = false
+                    if let data { iconData = data }
+                }
+            }
+            .sheet(item: $activePicker) { mode in
+                GameFilePicker(mode: mode, directory: library.driveC) { url in
+                    activePicker = nil
+                    if let url {
+                        let path = url.path
+                        if let driveURL = library.localURL(for: path) {
+                            let relative = "C:/\(driveURL.path.dropFirst(library.driveC.path.count + 1))".replacingOccurrences(of: "/", with: "\\")
+                            executable = relative
+                        } else {
+                            executable = url.path.replacingOccurrences(of: "\\", with: "/")
+                        }
+                    }
+                }
+            }
+        }.preferredColorScheme(.dark).tint(MadeiraTheme.accent)
+    }
+}
+
+private struct GameIconPicker: UIViewControllerRepresentable {
+    let selected: (Data?) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(selected: selected) }
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration(photoLibrary: .shared())
+        config.filter = .images
+        config.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let selected: (Data?) -> Void
+        init(selected: @escaping (Data?) -> Void) { self.selected = selected }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            guard let result = results.first,
+                  let provider = result.itemProvider as? NSItemProvider,
+                  provider.canLoadObject(ofClass: UIImage.self) else {
+                selected(nil)
+                return
+            }
+            provider.loadObject(ofClass: UIImage.self) { image, _ in
+                let data = (image as? UIImage)?.jpegData(compressionQuality: 0.85) ?? (image as? UIImage)?.pngData()
+                DispatchQueue.main.async { self.selected(data) }
+            }
+        }
     }
 }
 

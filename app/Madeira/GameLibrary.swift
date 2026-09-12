@@ -11,6 +11,7 @@ struct LibraryGame: Identifiable, Codable, Equatable {
     var kind: LaunchKind
     var executable: String
     var arguments: String = ""
+    var iconData: Data?
     var favorite: Bool = false
     var lastPlayed: Date?
 
@@ -85,6 +86,31 @@ final class GameLibrary: ObservableObject {
         var updated = games
         updated[index].lastPlayed = Date()
         save(updated)
+    }
+
+    func updateGameIcon(_ game: LibraryGame, iconData: Data?) {
+        guard let index = games.firstIndex(where: { $0.id == game.id }) else { return }
+        var updated = games
+        updated[index].iconData = iconData
+        save(updated)
+    }
+
+    @discardableResult
+    func update(_ game: LibraryGame, title: String, executable: String, arguments: String, iconData: Data? = nil) -> Bool {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = executable.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, path.lowercased().hasSuffix(".exe"),
+              let url = localURL(for: path), FileManager.default.fileExists(atPath: url.path) else {
+            errorMessage = "Update the shortcut to a valid Windows .exe in Madeira's C drive."
+            return false
+        }
+        guard let index = games.firstIndex(where: { $0.id == game.id }) else { return false }
+        var updated = games
+        updated[index].title = name
+        updated[index].executable = path
+        updated[index].arguments = arguments
+        updated[index].iconData = iconData ?? updated[index].iconData
+        return save(updated)
     }
 
     func remove(_ game: LibraryGame) { save(games.filter { $0.id != game.id }) }

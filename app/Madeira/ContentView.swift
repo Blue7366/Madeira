@@ -878,6 +878,7 @@ struct ContentView: View {
     @State private var activeGame: LibraryGame?
     @State private var pendingGame: LibraryGame?
     @State private var showingPlay = false
+    @State private var logSheetVisible = false
     @State private var sessionPreparing = false
     @State private var runtimeRunning = false
     @State private var sessionMessage = ""
@@ -947,12 +948,18 @@ struct ContentView: View {
                             .font(.caption).foregroundColor(MadeiraTheme.muted)
                     }
                     Spacer(minLength: 0)
-                    if geo.size.width > 600 { FPSOverlay(compact: true) }
+                    HStack(spacing: 8) {
+                        if geo.size.width > 600 { FPSOverlay(compact: true) }
+                        Button { logSheetVisible = true } label: {
+                            Image(systemName: "terminal").frame(width: 38, height: 38)
+                        }.buttonStyle(.plain).accessibilityLabel("Open logs")
+                    }
                     Button { MetalBackedView.toggleKeyboard() } label: {
                         Image(systemName: "keyboard").frame(width: 44, height: 44)
                     }.buttonStyle(.plain).accessibilityLabel("Toggle keyboard")
                 }
                 .padding(.horizontal, 12).frame(height: 72).background(MadeiraTheme.panel)
+                .sheet(isPresented: $logSheetVisible) { LibraryLogsView() }
 
                 MadeiraMetalView(onReady: startPendingGame)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
