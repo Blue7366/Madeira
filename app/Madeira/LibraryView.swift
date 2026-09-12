@@ -81,13 +81,14 @@ struct GameArtwork: View {
 }
 
 enum LibrarySection: String, CaseIterable, Identifiable {
-    case library = "Library", favorites = "Favorites", supported = "Supported", tools = "Tools", settings = "Settings"
+    case library = "Library", favorites = "Favorites", supported = "Supported", faq = "FAQ", tools = "Tools", settings = "Settings"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .library: return "square.grid.2x2"
         case .favorites: return "heart"
         case .supported: return "sparkles"
+        case .faq: return "questionmark.bubble"
         case .tools: return "display"
         case .settings: return "slider.horizontal.3"
         }
@@ -136,6 +137,7 @@ struct LibraryHome: View {
                             switch section {
                             case .library, .favorites: libraryContent
                             case .supported: supportedContent
+                            case .faq: faqContent
                             case .tools: toolsContent
                             case .settings:
                                 LibrarySettings(entitlements: entitlements, jitReady: jitReady,
@@ -344,6 +346,18 @@ struct LibraryHome: View {
         }
     }
 
+    private var faqContent: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            FAQBlock(question: "What is Madeira?", answer: "Madeira runs Windows PC games on a non-jailbroken iPhone by combining Wine, FEX-Emu for x86-64 to ARM64 translation, and DXMT for DirectX 11 to Metal.")
+            FAQBlock(question: "What is the status right now?", answer: "This is still a research project, not a product. Some titles are playable, some reach gameplay, and others are rough or title-specific. Expect a lot of iteration and per-game quirks.")
+            FAQBlock(question: "Do I need jailbreak?", answer: "No. Madeira targets a non-jailbroken iPhone, but JIT still requires debugger attachment via tools like StikDebug, which is why sideloading is required.")
+            FAQBlock(question: "Why do I need sideloading?", answer: "Because the app uses JIT on iOS, it cannot be distributed through the App Store and must be installed by signing it yourself with an Apple ID.")
+            FAQBlock(question: "What does the app currently support?", answer: "The project is strongest on DirectX 11 titles via DXMT, while DirectX 12 is still a future/follow-up path rather than a simple switch-on feature.")
+            FAQBlock(question: "Why do some games work better than others?", answer: "Different games use different Windows APIs, shaders, and runtime assumptions. Madeira is still in active development, so compatibility varies a lot by title.")
+            FAQBlock(question: "How do I add a game?", answer: "Use Add game in the library, or pick a supported preset from the Supported tab and import the game folder if needed. Madeira keeps the launch shortcut in its own library and does not delete the original files on disk.")
+        }
+    }
+
     private var toolsContent: some View {
         VStack(alignment: .leading, spacing: 22) {
             Text("A desktop when you need it. Checks when you don't.").foregroundColor(MadeiraTheme.muted)
@@ -361,6 +375,21 @@ struct LibraryHome: View {
                 }
             }
         }
+    }
+}
+
+private struct FAQBlock: View {
+    let question: String
+    let answer: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(question).font(.headline)
+            Text(answer).font(.subheadline).foregroundColor(MadeiraTheme.muted).lineSpacing(4)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MadeiraTheme.panel)
+        .cornerRadius(18)
     }
 }
 
