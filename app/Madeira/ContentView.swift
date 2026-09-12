@@ -1375,6 +1375,12 @@ struct ContentView: View {
         unsetenv("MADEIRA_ARGS")
         unsetenv("MADEIRA_DESKTOP")
         runWineFullSequence()
+        case .hollowKnight:
+        setenv("MADEIRA_EXE",
+               "C:\\Program Files\\Hollow Knight\\hollow_knight.exe", 1)
+        unsetenv("MADEIRA_ARGS")
+        unsetenv("MADEIRA_DESKTOP")
+        runWineFullSequence()
         case .cube:
         setenv("MADEIRA_EXE", "cube-x64.exe", 1)
         unsetenv("MADEIRA_ARGS")
