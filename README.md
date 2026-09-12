@@ -9,7 +9,7 @@ Mach process on iOS with wineserver as a thread rather than a separate process.
 
 ## Status
 
-Thumper and ULTRAKILL are playable. Marvel Cosmic Invasion has reached
+Thumper and ULTRAKILL and Hollow Knight are playable. Marvel Cosmic Invasion has reached
 gameplay, though a run has also ended in an unexplained termination and its
 controls are not yet reliable. Others reach gameplay at low frame rates. This
 is a research project, not a product: expect rough edges, per-title quirks and
