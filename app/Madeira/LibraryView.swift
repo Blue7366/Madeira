@@ -3,11 +3,54 @@ import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 
+enum MadeiraAccentPreset: String, CaseIterable, Identifiable {
+    case emerald
+    case blue
+    case orange
+    case purple
+    case rose
+    case aqua
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .emerald: return "Emerald"
+        case .blue: return "Blue"
+        case .orange: return "Orange"
+        case .purple: return "Purple"
+        case .rose: return "Rose"
+        case .aqua: return "Aqua"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .emerald: return Color(red: 0.73, green: 0.96, blue: 0.38)
+        case .blue: return Color(red: 0.46, green: 0.72, blue: 1.0)
+        case .orange: return Color(red: 1.0, green: 0.66, blue: 0.36)
+        case .purple: return Color(red: 0.79, green: 0.56, blue: 1.0)
+        case .rose: return Color(red: 0.98, green: 0.56, blue: 0.72)
+        case .aqua: return Color(red: 0.45, green: 0.96, blue: 0.90)
+        }
+    }
+}
+
 enum MadeiraTheme {
     static let background = Color(red: 0.035, green: 0.045, blue: 0.065)
     static let panel = Color(red: 0.075, green: 0.090, blue: 0.12)
-    static let accent = Color(red: 0.73, green: 0.96, blue: 0.38)
     static let muted = Color(red: 0.58, green: 0.63, blue: 0.70)
+    static let accentStorageKey = "madeira.accentPreset"
+
+    static var accent: Color {
+        let raw = UserDefaults.standard.string(forKey: accentStorageKey) ?? MadeiraAccentPreset.emerald.rawValue
+        return (MadeiraAccentPreset(rawValue: raw) ?? .emerald).color
+    }
+
+    static func setAccent(_ preset: MadeiraAccentPreset) {
+        UserDefaults.standard.setValue(preset.rawValue, forKey: accentStorageKey)
+    }
+
     static func colors(_ palette: Int) -> [Color] {
         switch palette % 4 {
         case 1: return [Color(red: 0.62, green: 0.24, blue: 0.10), Color(red: 0.17, green: 0.10, blue: 0.16)]
@@ -133,6 +176,7 @@ struct LibraryHome: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 28) {
                             header
+                            dx12StatusBanner
                             if let game = activeGame, sessionBusy { resumeBanner(game) }
                             switch section {
                             case .library, .favorites: libraryContent
@@ -299,6 +343,39 @@ struct LibraryHome: View {
             .padding(26)
         }
         .frame(height: 285).clipShape(RoundedRectangle(cornerRadius: 24))
+    }
+
+    private var dx12StatusBanner: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(MadeiraTheme.accent.opacity(0.18)).frame(width: 28, height: 28)
+                Image(systemName: "sparkle")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(MadeiraTheme.accent)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("DX12 support is coming soon")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+                Text("The dev says he is about 50% there and has a spinning DX12 cube running.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(MadeiraTheme.muted)
+            }
+            Spacer()
+            Image(systemName: "arrow.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(MadeiraTheme.accent)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(colors: [Color(red: 0.20, green: 0.26, blue: 0.38).opacity(0.90), Color(red: 0.12, green: 0.17, blue: 0.26).opacity(0.90)], startPoint: .leading, endPoint: .trailing)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(MadeiraTheme.accent.opacity(0.35), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func resumeBanner(_ game: LibraryGame) -> some View {
@@ -769,12 +846,36 @@ struct LibrarySettings: View {
     let testJIT: () -> Void
     let jitTestStatus: String
     let sessionBusy: Bool
+    @AppStorage(MadeiraTheme.accentStorageKey) private var accentPreset = MadeiraAccentPreset.emerald.rawValue
     @ObservedObject private var input = InputSettings.shared
     @ObservedObject private var controls = TouchControlsModel.shared
     @State private var guide = false
     @State private var logs = false
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            settingsGroup("Appearance", subtitle: "Tint the app to match your setup") {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(MadeiraAccentPreset.allCases) { preset in
+                        Button {
+                            accentPreset = preset.rawValue
+                            MadeiraTheme.setAccent(preset)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Circle().fill(preset.color).frame(width: 18, height: 18)
+                                Text(preset.label).font(.subheadline.weight(.medium))
+                                Spacer()
+                                if accentPreset == preset.rawValue {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(MadeiraTheme.accent)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
             settingsGroup("Runtime", subtitle: "Capabilities reported by this installation") {
                 capability("JIT", detail: "Required to translate Windows code", enabled: jitReady)
                 capability("Extra memory", detail: "A higher app memory limit", enabled: entitlements.map { $0.increasedMemory || $0.automaticMemory } ?? false)
