@@ -40,6 +40,18 @@ git clone --recurse-submodules <this repo>
 Note that `FEX`, `wine` and `research/dxmt` are submodules pointing at forks
 containing the iOS work; upstream clones will not build here.
 
+To package an unsigned/sideloadable development IPA locally on macOS:
+
+```sh
+chmod +x scripts/build-ipa.sh
+./scripts/build-ipa.sh
+```
+
+The script archives the Madeira Xcode project, signs it with automatic signing,
+and exports an `.ipa` into `build/ipa/`. Set `TEAM_ID=...` or override the
+export method with `METHOD=ad-hoc` / `METHOD=development` if you need a specific
+sideloading profile.
+
 ## License
 
 **GPL-3.0-or-later** — see [`LICENSE`](LICENSE). Derivatives that are
