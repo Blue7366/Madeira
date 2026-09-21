@@ -58,12 +58,17 @@ struct FPSOverlay: View {
     private let bufferCapacity = 50  // 5s @ 100ms
     /// ml606: live phys_footprint in MB, refreshed on the 250ms display tick.
     @State private var memMB: Int = 0
+    /// Approximate headroom the app has recovered by running a smaller pool than
+    /// the default 896MB proven baseline. This is an estimate, not kernel-level
+    /// swap accounting, but it is a useful real-time readout for the UI.
+    @State private var savedMB: Int = 0
 
     /// iOS jetsams this app at EXACTLY 4096MB of phys_footprint (memory:
     /// "Jetsam = EXACTLY 4096MB"). task_info(TASK_VM_INFO) reports the very
     /// same counter the kernel judges us on, so this is the real number and
     /// not an approximation from resident size.
     private static let jetsamLimitMB = 4096
+    private static let defaultPoolMB = 896
 
     private func readFootprintMB() -> Int {
         var info = task_vm_info_data_t()
@@ -88,6 +93,17 @@ struct FPSOverlay: View {
         return .red
     }
 
+    private func readSavedMB() -> Int {
+        let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("madeira-pool.txt")
+        guard let fileURL else { return 0 }
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return 0 }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let poolMB = Int(trimmed), poolMB > 0 else { return 0 }
+        let saved = Self.defaultPoolMB - min(poolMB, Self.defaultPoolMB)
+        return max(0, saved)
+    }
+
     var body: some View {
         Group {
             if visible && compact {
@@ -109,6 +125,11 @@ struct FPSOverlay: View {
                     Text("\(memMB)MB")
                         .foregroundColor(memColor)
                         .frame(width: 56, alignment: .trailing)
+                    if savedMB > 0 {
+                        Text("Saved:\(savedMB)MB")
+                            .foregroundColor(.green)
+                            .frame(width: 74, alignment: .trailing)
+                    }
                     Text("|")
                         .foregroundColor(.secondary)
                     Text("Present:")
@@ -191,6 +212,7 @@ struct FPSOverlay: View {
         let c = madeira_get_present_count()
         samples = [(now, c)]
         presentCount = c
+        savedMB = readSavedMB()
         vsyncMode = madeira_get_vsync_locked()
         ProMotionIntent.shared.setActive(vsyncMode != 1)
 
@@ -210,6 +232,7 @@ struct FPSOverlay: View {
             // ml606: piggybacks on the existing tick, so it costs one extra
             // task_info per 250ms and no additional SwiftUI invalidation.
             memMB = readFootprintMB()
+            savedMB = readSavedMB()
         }
     }
 

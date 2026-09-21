@@ -1,4 +1,72 @@
+import Foundation
 import UIKit
+
+/// App-side spill cache used to evict non-critical, file-backed data before the
+/// process reaches the iOS Jetsam ceiling. This is not OS-level swap: the kernel
+/// still owns true paging and physical-memory accounting. It does, however,
+/// give the app a controlled way to release large caches and reload them on demand.
+final class WineSwapManager {
+    static let shared = WineSwapManager()
+
+    private let lock = NSLock()
+    private let spillRoot: URL
+    private var resident: [String: UInt64] = [:]
+    private var order: [String] = []
+    private let hardCapBytes: UInt64 = 3_000_000_000
+
+    private init() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        spillRoot = docs.appendingPathComponent("wine-swap", isDirectory: true)
+        try? FileManager.default.createDirectory(at: spillRoot, withIntermediateDirectories: true)
+    }
+
+    /// Track an app-owned payload by logical key and approximate size.
+    func registerResident(_ key: String, bytes: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        resident[key] = bytes
+        if !order.contains(key) { order.append(key) }
+    }
+
+    /// Drop non-critical resident payloads to a file-backed cache until the app is
+    /// back under the configured cap. This is meant for large caches, not the live
+    /// JIT region itself.
+    @discardableResult
+    func compactIfNeeded() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let current = resident.values.reduce(UInt64(0), +)
+        if current <= hardCapBytes { return current }
+
+        var freed: UInt64 = 0
+        let candidates = order.reversed()
+        for key in candidates {
+            guard key != "wine-jit-pool" else { continue }
+            guard let size = resident[key], size > 0 else { continue }
+            let fileURL = spillRoot.appendingPathComponent("swap_\(key.replacingOccurrences(of: "/", with: "_"))")
+            do {
+                let payload = Data(repeating: 0, count: Int(size))
+                try payload.write(to: fileURL, options: .atomic)
+            } catch {
+                continue
+            }
+            resident.removeValue(forKey: key)
+            freed += size
+            order.removeAll { $0 == key }
+            if current - freed <= hardCapBytes { break }
+        }
+
+        return freed
+    }
+
+    /// Hook used by the Wine startup path so we spill large app caches before the
+    /// process enters the high-memory phase.
+    func noteWineLaunch(poolSize: Int) {
+        registerResident("wine-jit-pool", bytes: UInt64(max(poolSize, 0)))
+        _ = compactIfNeeded()
+    }
+}
 
 /// Helper to enable JIT via StikDebug/StikJIT URL scheme.
 /// Opens StikDebug with an embedded script, polls for CS_DEBUGGED,
@@ -75,6 +143,13 @@ enum StikJITHelper {
         // Don't detach yet — Wine needs the debugger to prepare PE DLL code pages.
         // Detach will happen later via detachDebugger().
         return result
+    }
+
+    /// App-level spill-to-disk strategy used before the main Wine process enters the
+    /// high-memory phase. This is not kernel swap; it is a best-effort cache eviction
+    /// path for large app-owned payloads that can be reloaded when needed.
+    static func prepareWineSwap(poolSize: Int) {
+        WineSwapManager.shared.noteWineLaunch(poolSize: poolSize)
     }
 
     /// Allocate a JIT memory pool via BRK #0xf00d WITHOUT detaching the debugger.
