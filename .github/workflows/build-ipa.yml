@@ -16,9 +16,9 @@ jobs:
       XCODE_PROJECT: app/Madeira.xcodeproj
       XCODE_SCHEME: Madeira
       CONFIGURATION: Release
-      ARCHIVE_PATH: ${{ runner.temp }}/Madeira.xcarchive
-      EXPORT_PATH: ${{ runner.temp }}/ipa
-      EXPORT_OPTIONS_PATH: ${{ runner.temp }}/ExportOptions.plist
+      ARCHIVE_PATH: $RUNNER_TEMP/Madeira.xcarchive
+      EXPORT_PATH: $RUNNER_TEMP/ipa
+      EXPORT_OPTIONS_PATH: $RUNNER_TEMP/ExportOptions.plist
       APP_BUNDLE_ID: com.willfaust.mythicemu
 
     steps:
@@ -37,14 +37,16 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD || 'temporary-keychain-password' }}
         run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          if [ -n "$APPLE_CERTIFICATE_BASE64" ]; then
+            security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+            security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+            printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+            security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+            security list-keychain -d user -s "$KEYCHAIN_PATH"
+            security default-keychain -d user -s "$KEYCHAIN_PATH"
+          fi
 
       - name: Write export options
         env:
@@ -98,5 +100,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Madeira-IPA
-          path: ${{ runner.temp }}/ipa/*.ipa
+          path: $RUNNER_TEMP/ipa/*.ipa
           if-no-files-found: error
