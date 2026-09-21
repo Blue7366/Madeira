@@ -2643,9 +2643,12 @@ enum TouchControlsHost {
             // ordering nothing inside the app window can undo.
             w.windowLevel = .normal + 101
             w.backgroundColor = .clear
+            w.isMultipleTouchEnabled = true
             w.isHidden = false        // deliberately never made key
             let host = UIHostingController(rootView: TouchControlsOverlay())
             host.view.backgroundColor = .clear
+            host.view.isMultipleTouchEnabled = true
+            host.view.isUserInteractionEnabled = true
             w.rootViewController = host
             window = w
         }
