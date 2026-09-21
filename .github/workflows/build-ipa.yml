@@ -75,6 +75,17 @@ jobs:
           </plist>
           EOF
 
+      - name: Build native iOS support libs
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE"
+          bash build/freetype-ios/build.sh
+          bash build/gnutls-ios/build.sh
+          bash build/ntdll-unix/build.sh
+          bash build/wineserver/build.sh
+          bash build/win32u-unix/build.sh
+          bash build/dxmt-ios/build.sh
+
       - name: Build archive
         run: |
           mkdir -p "$EXPORT_PATH"
