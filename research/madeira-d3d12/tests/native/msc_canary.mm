@@ -393,7 +393,7 @@ extern "C" int madeira_d3d12_canary_run_log(const char *fixture_dir, const char 
         g_sink = sink; g_checks = 0; g_fails = 0;
         g_log = (log_path && *log_path) ? fopen(log_path, "w") : NULL;
         char vsbuf[1100], psbuf[1100];
-        if (!fixture_dir || !*fixture_dir) fixture_dir = "madeira-d3d12/shaders";
+        if (!fixture_dir || !*fixture_dir) fixture_dir = "research/madeira-d3d12/shaders";
         snprintf(vsbuf, sizeof vsbuf, "%s/canary_vs.dxil", fixture_dir);
         snprintf(psbuf, sizeof psbuf, "%s/canary_ps.dxil", fixture_dir);
         const char *vs_path = vsbuf, *ps_path = psbuf;

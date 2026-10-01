@@ -3,7 +3,7 @@
 Questions about what Metal or the Metal Shader Converter will actually do,
 answered on the M4 Max without spending a device run. Every one of these was
 written to kill a specific hypothesis about the D3D12 runtime, and every one
-of them did.
+of them did kill it — see `../../PARKED-2026-09-16-ue5-state.md`, "Refuted".
 
 Build each one standalone. The converter SDK is not in git; extract it from
 Apple's installer package first:
@@ -59,7 +59,7 @@ answer away — which cost a confusing round trip.
   (Apple9) only** — untested on the A15 and on the paravirtual device, which
   matters if rendering ever moves back on-device.
 
-`atomic64/` also needs the host LLVM 15 build (`dxmt/toolchains/llvm-host-build`)
+`atomic64/` also needs the host LLVM 15 build (`research/dxmt/toolchains/llvm-host-build`)
 for the rewrite driver, and AMD's `ags_shader_intrinsics_dx12.hlsl` (GPUOpen AGS_SDK,
 `ags_lib/hlsl/`, MIT) next to `ags.hlsl` for T3 — it is not kept in git:
 
@@ -69,9 +69,9 @@ T=../../../../dxmt/toolchains; L=$($T/llvm-host-build/bin/llvm-config --libs bit
 clang++ -std=c++17 -O1 -fno-rtti -I$T/llvm-project/llvm/include -I$T/llvm-host-build/include \
         ../../../src/unix/madeira_ags.cpp rw_main.cpp -L$T/llvm-host-build/lib $L -o rw
 clang++ -O1 -fobjc-arc -I"$INC" -L"$LIB" -lmetalirconverter -framework Metal -framework Foundation -o t t.mm
-wine ../../../../toolchains/dxc-win/bin/x64/dxc.exe -T cs_6_6 -E CSMain -Fo CSMain.dxil v.hlsl
+wine ../../../../../toolchains/dxc-win/bin/x64/dxc.exe -T cs_6_6 -E CSMain -Fo CSMain.dxil v.hlsl
 DYLD_LIBRARY_PATH="$LIB" ./t CSMain.dxil                      # T1
-wine ../../../../toolchains/dxc-win/bin/x64/dxc.exe -T cs_6_0 -E CSMain -Fo ags.dxil ags.hlsl
+wine ../../../../../toolchains/dxc-win/bin/x64/dxc.exe -T cs_6_0 -E CSMain -Fo ags.dxil ags.hlsl
 ./rw ags.dxil ags_rw.dxil && DYLD_LIBRARY_PATH="$LIB" ./t ags_rw.dxil   # T3
 ```
 

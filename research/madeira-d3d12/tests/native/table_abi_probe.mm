@@ -123,8 +123,8 @@ int main(void) {
     IRRootSignature *rs = make_rs();
     if (!rs) return 1;
     char vsn[128] = {0}, psn[128] = {0};
-    id<MTLLibrary> vlib = build(dev, "madeira-d3d12/shaders/tex_vs.dxil", "MainVS", rs, vsn);
-    id<MTLLibrary> plib = build(dev, "madeira-d3d12/shaders/tex_ps.dxil", "MainPS", rs, psn);
+    id<MTLLibrary> vlib = build(dev, "research/madeira-d3d12/shaders/tex_vs.dxil", "MainVS", rs, vsn);
+    id<MTLLibrary> plib = build(dev, "research/madeira-d3d12/shaders/tex_ps.dxil", "MainPS", rs, psn);
     if (!vlib || !plib) return 1;
     printf("entry points: '%s' / '%s'\n", vsn, psn);
 

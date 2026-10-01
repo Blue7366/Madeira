@@ -15,8 +15,8 @@
  *   - the size bound evicts least-recently-used entries and nothing else.
  *
  * Build and run (Linux / WSL / macOS):
- *   cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I madeira-d3d12/src \
- *      madeira-d3d12/tests/native/dxil_cache_test.c -o /tmp/dxil_cache_test && /tmp/dxil_cache_test
+ *   cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I research/madeira-d3d12/src \
+ *      research/madeira-d3d12/tests/native/dxil_cache_test.c -o /tmp/dxil_cache_test && /tmp/dxil_cache_test
  */
 #include "unix/madeira_dxil_cache.h"
 

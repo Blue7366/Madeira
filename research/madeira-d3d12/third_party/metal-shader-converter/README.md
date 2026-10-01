@@ -16,7 +16,7 @@ folders. Apple's proprietary library is not covered by that licence; see
 `app/Madeira/d3d12/NOTICE.txt`.
 
 They are here so that a clean clone builds the D3D12 runtime's conversion
-service (`madeira-d3d12/src/unix/madeira_ir_unix.mm`) without the
+service (`research/madeira-d3d12/src/unix/madeira_ir_unix.mm`) without the
 installer package. `build/madeira-d3d12/deps.sh` checks every file against
 `SHA256SUMS` before using them. After a converter update, run
 `build/madeira-d3d12/fetch-converter.sh` with the new package: it re-stages the

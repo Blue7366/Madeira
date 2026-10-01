@@ -6,7 +6,7 @@
  *  "rsdeser-test:begin" and "rsdeser-test:end" markers -- on their own, so the
  *  code under test is the shipped code, not a copy.
  *
- *  Build (from madeira-d3d12, with the llvm-mingw toolchain):
+ *  Build (from research/madeira-d3d12, with the llvm-mingw toolchain):
  *    awk '/rsdeser-test:begin/{on=1} on{print} /rsdeser-test:end/{on=0}' \
  *        src/pe/madeira_d3d12.c > /tmp/rsdeser/rsdeser_extract.inc
  *    x86_64-w64-mingw32-clang -O1 -Wall -I/tmp/rsdeser -Isrc \

@@ -445,7 +445,7 @@ rather than a licence requirement.
 ## Layout
 
 ```
-madeira-d3d12/
+research/madeira-d3d12/
   shaders/canary.hlsl            single root CBV fixture
   shaders/canary_layout.hlsl     root constants + root CBV, layout fixture
   shaders/*.dxil                 compiled fixtures, root signatures embedded
@@ -462,13 +462,13 @@ build/madeira-d3d12/
 `.gitignore` line 103 ignores `research/*` with explicit negations for the
 subdirectories that are tracked, currently only `research/remote-metal/`. So
 everything here is **untracked and invisible to `git status`** today. Adding
-`!madeira-d3d12/` is what would put it under version control, and that
+`!research/madeira-d3d12/` is what would put it under version control, and that
 is deliberately left for the user to decide along with the commit boundary.
 `build/madeira-d3d12/` is not ignored and does show as untracked.
 
 ## Rollback
 
-Delete `madeira-d3d12/` and `build/madeira-d3d12/`. Nothing else
+Delete `research/madeira-d3d12/` and `build/madeira-d3d12/`. Nothing else
 references them: no existing build script, source file or bundle resource was
 changed to produce the current state.
 

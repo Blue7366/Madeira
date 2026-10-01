@@ -17,7 +17,7 @@
  * arrives in the arguments rather than being read from the local device. */
 #include <dlfcn.h>
 #include <mach-o/loader.h>   /* ml1990: LC_UUID of the converter dylib */
-#include "../../../build/madeira_cfg.h"   /* ml1095: one config file */
+#include "../../../../build/madeira_cfg.h"   /* ml1095: one config file */
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
