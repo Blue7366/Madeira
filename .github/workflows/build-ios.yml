@@ -118,10 +118,10 @@ jobs:
           # [rpm-cas] drain calls into the rpmalloc fork, which only the PE modules link.
           p = 'FEX/FEXCore/Source/Interface/Core/Core.cpp'
           s = open(p).read()
-          start = s.find('      {\n        rpm_cas_snapshot Snap;')
+          start = s.find('     {\n        rpm_cas_snapshot Snap;')
           tail = 'Snap.fail_changed, Snap.fail_unchanged, Snap.fail_invalid);\n        }\n      }\n'
           end = s.find(tail, start)
-          if start != -1 and end != -1 and '#ifdef FEX_IOS_HOST\n      {\n        rpm_cas_snapshot Snap;' not in s:
+          if start != -1 and end != -1 and '#ifdef FEX_IOS_HOST\n     {\n        rpm_cas_snapshot Snap;' not in s:
               end += len(tail)
               s = s[:start] + '#ifdef FEX_IOS_HOST\n' + s[start:end] + '#endif\n' + s[end:]
               open(p, 'w').write(s)
@@ -258,6 +258,10 @@ jobs:
             toolchains/llvm-ios-build/lib/*.a
           key: llvm-ios-${{ env.LLVM_VERSION }}-v1
 
+      - name: Patch DXMT include path for root location
+        run: |
+          sed -i '' 's|\.\./\.\./\.\./\.\./\.\./build/madeira_cfg\.h|\.\./\.\./\.\./\.\./build/madeira_cfg\.h|g' dxmt/src/winemetal/unix/winemetal_unix.c
+
       - name: DXMT unix side + combined archive
         run: |
           set -eu
@@ -266,7 +270,7 @@ jobs:
           for sh in air_msad air_samplepos air_tessellation; do
             (cd build/dxmt-ios/shader-headers \
              && xcrun -sdk macosx metal -std=metal3.1 --target=air64-apple-macos14.0 \
-                  -o $sh.air -c ../../../dxmt/src/airconv/shaders/$sh.metal \
+                 -o $sh.air -c ../../../dxmt/src/airconv/shaders/$sh.metal \
              && xxd -n $sh -i $sh.air $sh.h)
           done
           build/dxmt-ios/build.sh
