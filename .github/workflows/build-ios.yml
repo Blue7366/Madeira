@@ -258,9 +258,10 @@ jobs:
             toolchains/llvm-ios-build/lib/*.a
           key: llvm-ios-${{ env.LLVM_VERSION }}-v1
 
-      - name: Patch DXMT include path for root location
+      - name: Patch DXMT include paths for root location
         run: |
           sed -i '' 's|\.\./\.\./\.\./\.\./\.\./build/madeira_cfg\.h|\.\./\.\./\.\./\.\./build/madeira_cfg\.h|g' dxmt/src/winemetal/unix/winemetal_unix.c
+          sed -i '' 's|\.\./\.\./\.\./\.\./remote-metal/protocol\.h|\.\./\.\./\.\./research/remote-metal/protocol\.h|g' dxmt/src/winemetal/unix/wmt_remote_client.h
 
       - name: DXMT unix side + combined archive
         run: |
