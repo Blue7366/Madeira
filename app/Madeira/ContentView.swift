@@ -2432,6 +2432,11 @@ struct ContentView: View {
             library.error = "The executable path or launch arguments are too long."; return
         }
         entry.configureLaunch()
+        // This run's log under the program's name too (Documents/logs). A Steam game started
+        // through Madeira Dock above gets its own from ntdll, once Valve's client starts it.
+        let program = entry.desktop == true ? "explorer.exe"
+            : entry.launchWindowsPath.split(separator: "\\").last.map(String.init) ?? entry.launchWindowsPath
+        LogStore.shared.startSessionLog(program: program)
         library.begin(entry)
         runWineFullSequence(profile: entry)
     }
@@ -2452,6 +2457,8 @@ struct ContentView: View {
         /* ml1095: one config file. Written once from any legacy madeira-*.txt. */
         MadeiraConfig.migrateLegacy { self.logStore.log($0) }
         MadeiraConfig.deleteLegacyFiles { self.logStore.log($0) }   /* ml1096: the old files go once the cfg exists */
+        /* ml2100: XInput (default) or the HID controller; before the wineserver starts. */
+        GamepadInput.shared.beginPadSession()
         /* ml1990: player 1 exists before the game enumerates XInput. */
         GamepadInput.shared.reserveSessionSlot(touchControls: TouchControlsModel.shared.offersControllerInput)
         if MadeiraConfig.present {
@@ -2485,6 +2492,8 @@ struct ContentView: View {
             if let profile {
                 profile.applyEnvironment()
                 logStore.log("[launch-route] library profile applied")
+            } else {
+                _ = try? MadeiraConfig.applyGame(nil)   // no library game: no game's own lines
             }
 
             // Step 1: Allocate JIT pool (BRK suspends entire process)
@@ -2653,13 +2662,19 @@ struct ContentView: View {
             // d3d11.mipClampBC=N is the one that matters for memory: this GPU cannot
             // sample BC, so those textures are expanded to uncompressed and cost 2-8x
             // their shipped size.
-            if let txt = MadeiraConfig.get("dxmt") {
-                let v = txt.replacingOccurrences(of: ";", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)   /* ml1095: "a=b;c=d" on one line */
-                if !v.isEmpty {
-                    setenv("DXMT_CONFIG", v, 1)
-                    logStore.log("DXMT config: \(v) via madeira.cfg dxmt")
+            // DXMT splits DXMT_CONFIG on ";" only and a newline is not whitespace to
+            // its line parser, so the options are joined with ";" (ml1095: "a=b;c=d"
+            // on one line). A library game's own dxmt options come after madeira.cfg's.
+            var dxmtOptions: [String] = []
+            for (source, txt) in [("madeira.cfg dxmt", MadeiraConfig.get("dxmt")), ("the game's config", MadeiraConfig.gameValue("dxmt"))] {
+                let parts = (txt ?? "").split(whereSeparator: { $0 == ";" || $0.isNewline })
+                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                if !parts.isEmpty {
+                    dxmtOptions += parts
+                    logStore.log("DXMT config: \(parts.joined(separator: ";")) via \(source)")
                 }
             }
+            if !dxmtOptions.isEmpty { setenv("DXMT_CONFIG", dxmtOptions.joined(separator: ";"), 1) }
 
             // D3D9 frontend for 32-bit programs. The i386 d3d9.dll is DXMT's thin
             // shim; unset (the default) or "emulated", it forwards every export to

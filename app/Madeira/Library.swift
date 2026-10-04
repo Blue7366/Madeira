@@ -40,15 +40,17 @@ enum DeviceLoadDiagnostics {
         guard now - lastReport >= 10 else { return }
         lastReport = now
         let process = ProcessInfo.processInfo
-        let thermal: String
-        switch process.thermalState {
-        case .nominal: thermal = "nominal"
-        case .fair: thermal = "fair"
-        case .serious: thermal = "serious"
-        case .critical: thermal = "critical"
-        @unknown default: thermal = "unknown"
-        }
+        let thermal = thermalName(process.thermalState)
         fputs("[device-load] thermal=\(thermal) low-power=\(process.isLowPowerModeEnabled ? 1 : 0) capture=\(UIScreen.main.isCaptured ? 1 : 0)\n", stderr)
+    }
+    static func thermalName(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
     }
 }
 
@@ -243,6 +245,17 @@ struct LibraryEntry: Codable, Identifiable {
     /// library files decode; the fork's files carry the same keys.
     var fastSync: Bool?
     var semaphoreFastPath: Bool?
+    /// This game's own lines in madeira.cfg's syntax (Game details › This game's
+    /// config). At launch a key set here wins over madeira.cfg, env.NAME lines are
+    /// exported after madeira.cfg's and dxmt options are added to its own
+    /// (MadeiraConfig.applyGame). nil: none.
+    var config: String?
+    /// AVX and AVX2 for this game (FEX's 128-bit AVX emulation, MADEIRA_FEX_AVX);
+    /// nil = off, FEX's iOS default.
+    var avx: Bool?
+    /// Experimental MetalFX frame interpolation between the game's frames
+    /// (DXMT's present path, MADEIRA_FRAMEGEN); nil = off.
+    var frameGeneration: Bool?
 
     var displayMode: DisplayMode { display.flatMap(DisplayMode.init(rawValue:)) ?? .fit }
 
@@ -297,6 +310,10 @@ struct LibraryEntry: Codable, Identifiable {
         // WineProcessBridge takes at most 64 arguments in 4 KB.
         guard launchArguments.utf8.count < 4096 else { throw LibraryError.message("The complete launch command is too long.") }
         guard !quoted, tokens <= 64 else { throw LibraryError.message("Use balanced double quotes and at most 64 launch arguments in total.") }
+        // build/madeira_cfg.h reads at most 64 KB of a file.
+        guard (config?.utf8.count ?? 0) < 60_000, config?.contains("\0") != true else {
+            throw LibraryError.message("This game's config is too long.")
+        }
     }
 
     /// Runs on the launch worker, before the JIT pool is taken.
@@ -313,6 +330,9 @@ struct LibraryEntry: Codable, Identifiable {
         if GamepadInput.keyboardMouseAvailable, controllerMode == "dinput" { setenv("MADEIRA_DINPUT_PAD", "1", 1) }
         else if MadeiraConfig.get("env.MADEIRA_DINPUT_PAD") == nil { unsetenv("MADEIRA_DINPUT_PAD") }
         if let anisotropyLimit, [1, 2, 4, 8].contains(anisotropyLimit) { setenv("DXMT_D9_ANISO_LIMIT", String(anisotropyLimit), 1) }
+        // Set or unset, so a previous session's choice never stays.
+        if avx == true { setenv("MADEIRA_FEX_AVX", "1", 1) } else { unsetenv("MADEIRA_FEX_AVX") }
+        if frameGeneration == true { setenv("MADEIRA_FRAMEGEN", "1", 1) } else { unsetenv("MADEIRA_FRAMEGEN") }
         // Fastsync's per-game switches, only when Settings chose Fastsync; with Madsync
         // (the default) or Wine's standard sync nothing is exported here.
         if SyncEngine.current == .fastsync {
@@ -321,6 +341,15 @@ struct LibraryEntry: Codable, Identifiable {
             setenv("MADEIRA_FASTSYNC_SEM", semaphoreFastPath == true ? "1" : "0", 1)
         }
         madeira_set_vsync_locked(effectiveFPSMode)
+        // This game's own lines; a launch without any unsets the previous game's.
+        do {
+            let pairs = try MadeiraConfig.applyGame(config)
+            if !pairs.isEmpty {
+                LogStore.shared.log("[game-cfg] " + pairs.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))
+            }
+        } catch {
+            LogStore.shared.log("[game-cfg] this game's config could not be written: \(error.localizedDescription)")
+        }
         fputs("[frontend] launch profile applied\n", stderr)
         LogStore.shared.log("[display-shape] resolution=\(resolution) mode=\(displayMode.rawValue)")
     }
@@ -2326,6 +2355,11 @@ struct LibraryDetail: View {
         guard (640...4096).contains(width), width != 1280, width != 960 else { return nil }
         return "\(width)x720"
     }
+    /// "None", or how many keys this game's own config sets.
+    static func configSummary(_ config: String?) -> String {
+        let count = MadeiraConfig.parse(config ?? "").count
+        return count == 0 ? "None" : count == 1 ? "1 setting" : "\(count) settings"
+    }
     private func start() {
         guard !leaving else { return }
         // A Steam game starts through Madeira Dock (ContentView.launchLibraryEntry)
@@ -2419,9 +2453,32 @@ struct LibraryDetail: View {
                         ForEach(DisplayMode.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
                     }
                     FPSChoice(mode: $entry.fpsMode)
+                    // The Desktop too: its programs present through the same path, and its
+                    // launch exports the switch like a game's (applyEnvironment).
+                    Toggle("Frame generation (experimental)", isOn: Binding(get: { entry.frameGeneration ?? false }, set: { entry.frameGeneration = $0 ? true : nil }))
+                    if entry.frameGeneration == true {
+                        Text("Shows a MetalFX-generated frame between every two rendered frames: twice the frames on screen, at the cost of GPU time, some latency and artifacts at edges and on the HUD. FPS limits do not apply while it is on.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                // A Steam game starts with Steam's own launch option through Madeira Dock.
+                if entry.desktop != true && entry.steamAppID == nil {
+                    Section {
+                        TextField("Launch arguments", text: $entry.arguments, axis: .vertical)
+                            .font(.body.monospaced()).lineLimit(1...4)
+                            .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        LaunchFlagChips(arguments: $entry.arguments)
+                        // What the next start runs.
+                        Text(([(entry.relativePath as NSString).lastPathComponent] + (entry.arguments.isEmpty ? [] : [entry.arguments])).joined(separator: " "))
+                            .font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    } header: { Text("Launch arguments") } footer: {
+                        Text("Passed to the program on every start; the line above is the command that runs. The flags add or remove themselves; the renderer flags exclude each other, as do -windowed and -fullscreen.")
+                    }
                 }
                 Section {
                     Toggle("Reduced-precision x87", isOn: $entry.reducedX87)
+                    // Exported for this game only when chosen (applyEnvironment).
+                    Toggle("AVX and AVX2", isOn: Binding(get: { entry.avx ?? false }, set: { entry.avx = $0 ? true : nil }))
                     // Exported for this game only when chosen (applyEnvironment).
                     Picker("CPU cores reported", selection: Binding(get: { entry.cpuCount ?? 0 }, set: { entry.cpuCount = $0 == 0 ? nil : $0 })) {
                         Text("Automatic").tag(0)
@@ -2443,12 +2500,8 @@ struct LibraryDetail: View {
                         Text("Fast synchronization and fast semaphore waits are Fastsync options. Choose Fastsync in Settings › Memory & sync to use them.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    // A Steam game starts with Steam's own launch option through Madeira Dock.
-                    if entry.desktop != true && entry.steamAppID == nil {
-                        TextField("Launch arguments", text: $entry.arguments, axis: .vertical).autocorrectionDisabled().textInputAutocapitalization(.never)
-                    }
                 } header: { Text("Compatibility & performance") } footer: {
-                    Text("Reduced-precision x87 can make older games faster at some cost in accuracy; it is off by default. With Fastsync, fast synchronization (on by default) handles events without a server round trip, and fast semaphore waits (off by default) does the same for semaphores. Settings apply to the next launch; a precision change may still require restarting Madeira.")
+                    Text("Reduced-precision x87 can make older games faster at some cost in accuracy; it is off by default. Turn on AVX and AVX2 (off by default, 64-bit games) when a game built for AVX processors quits at start with an illegal instruction (c000001d); FEX then emulates AVX, which is slower. With Fastsync, fast synchronization (on by default) handles events without a server round trip, and fast semaphore waits (off by default) does the same for semaphores. Settings apply to the next launch; a precision change may still require restarting Madeira.")
                 }
                 Section("On screen") {
                     Toggle("Performance overlay", isOn: $entry.performance)
@@ -2478,6 +2531,15 @@ struct LibraryDetail: View {
                         Text("XInput and DirectInput: for games older than XInput, which read the pad through DirectInput. The same pad is offered through both APIs, so a game that reads both may list two controllers. Applies to the next launch.").font(.caption).foregroundStyle(.secondary)
                         Text("Keyboard and mouse: for games without controller support. The controller presses keys and moves the mouse (left stick WASD, right stick mouse, triggers click, D-pad arrows, Start Esc, Select Tab) and the game sees no controller. Change what each button does under Controller binds, here or in the in-game menu.").font(.caption).foregroundStyle(.secondary)
                     }
+                }
+                Section {
+                    NavigationLink {
+                        LibraryGameConfigEditor(text: Binding(get: { entry.config ?? "" }, set: { entry.config = $0.isEmpty ? nil : $0 }))
+                    } label: {
+                        LabeledContent("This game's config", value: Self.configSummary(entry.config))
+                    }
+                } header: { Text("Advanced") } footer: {
+                    Text("Lines in madeira.cfg's format for this game only. A key set here wins over madeira.cfg wherever the runtime reads it, env.NAME lines are exported after madeira.cfg's, and dxmt options are added to madeira.cfg's. Applies from the next start.")
                 }
                 if entry.steamAppID != nil {
                     Section {
@@ -2528,6 +2590,25 @@ struct LibraryDetail: View {
                 if command == "accept" { start() }
             }
         }
+    }
+}
+
+/// Game details › This game's config: the game's own lines in madeira.cfg's
+/// syntax, saved with the entry and applied at its next start
+/// (LibraryEntry.config, MadeiraConfig.applyGame).
+struct LibraryGameConfigEditor: View {
+    @Binding var text: String
+    var body: some View {
+        Form {
+            Section {
+                TextEditor(text: $text)
+                    .font(.caption.monospaced()).frame(minHeight: 260)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+            } footer: {
+                Text("One key = value per line, as in madeira.cfg; lines starting with # are comments. Examples: fence-chain = 6, dxmt = d3d11.mipClampBC=1, env.FEX_MULTIBLOCK = 1.")
+            }
+        }
+        .navigationTitle("This game's config").navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -2743,6 +2824,59 @@ struct ControllerModeChoice: View {
     }
 }
 
+/// Game details › Launch arguments: one chip per common flag, highlighted when
+/// the arguments contain it; a tap adds or removes it. -dx9 to -dx12 exclude each
+/// other, as do -windowed and -fullscreen. Quoted arguments are kept whole.
+struct LaunchFlagChips: View {
+    @Binding var arguments: String
+    static let flags = ["-dx11", "-dx12", "-dx10", "-dx9", "-windowed", "-fullscreen", "-nosplash"]
+
+    /// The arguments split at unquoted spaces and tabs, quotes kept.
+    static func tokens(_ text: String) -> [String] {
+        var out: [String] = [], current = "", quoted = false
+        for character in text {
+            if character == "\"" { quoted.toggle() }
+            if !quoted && (character == " " || character == "\t") {
+                if !current.isEmpty { out.append(current); current = "" }
+            } else {
+                current.append(character)
+            }
+        }
+        if !current.isEmpty { out.append(current) }
+        return out
+    }
+    static func contains(_ text: String, _ flag: String) -> Bool {
+        tokens(text).contains { $0.caseInsensitiveCompare(flag) == .orderedSame }
+    }
+    static func toggled(_ text: String, _ flag: String) -> String {
+        var parts = tokens(text)
+        if contains(text, flag) {
+            parts.removeAll { $0.caseInsensitiveCompare(flag) == .orderedSame }
+        } else {
+            let renderers = ["-dx9", "-dx10", "-dx11", "-dx12"]
+            if renderers.contains(flag) { parts.removeAll { renderers.contains($0.lowercased()) } }
+            if flag == "-windowed" { parts.removeAll { $0.lowercased() == "-fullscreen" } }
+            if flag == "-fullscreen" { parts.removeAll { $0.lowercased() == "-windowed" } }
+            parts.append(flag)
+        }
+        return parts.joined(separator: " ")
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Self.flags, id: \.self) { flag in
+                    let on = Self.contains(arguments, flag)
+                    Button(flag) { arguments = Self.toggled(arguments, flag) }
+                        .buttonStyle(.bordered).tint(on ? Color.accentColor : Color.gray)
+                        .font(.caption.monospaced())
+                        .accessibilityValue(on ? "On" : "Off")
+                }
+            }
+        }
+    }
+}
+
 struct FPSChoice: View {
     @Binding var mode: Int
     var body: some View {
@@ -2921,7 +3055,7 @@ struct RuntimeMemorySyncSettings: View {
                 Text("Video memory is how much graphics memory games are told they have. Automatic sizes it from the memory free at launch. Too high can get Madeira closed for using too much memory; too low makes games keep reloading textures.")
                 Text("Swap tier moves game data to a file on this device's storage when memory runs short, up to the chosen size, at some speed cost. Coverage decides which allocations it moves: large ones only (8 MB and up, the default), every allocation of 1 MB and up, or those plus allocations that overflow the game's address range. Wider coverage saves more memory but can slow a game down.")
                 Text("Sync engine: Fastsync (the default) handles events and semaphores in-process; its per-game options are in each game's details. Madsync is the older in-process engine. Wine standard sync uses neither. Only one engine runs at a time.")
-                Text("Eco mode starts every game with its threads at a low priority, which saves power but makes games run slower. Off by default. It is meant for loading screens: the ECO pill in the performance overlay turns it on and off while a game runs.")
+                Text("Eco mode starts every game with its threads at a low priority, which saves power but makes games run slower. Off by default. It is meant for loading screens: Eco mode in the in-game menu turns it on and off while a game runs.")
                 if changed { Text("Restart Madeira (close it from the app switcher) for these changes to apply.").foregroundStyle(.orange) }
             }
         }
@@ -3048,6 +3182,14 @@ struct LibraryHUD: View {
     /// A Madeira Dock start: its status, failure and Show desktop (DockStartScreen).
     @ObservedObject private var dockStart = DockStartScreen.shared
     private let sessionTools = MadeiraConfig.flag("MADEIRA_SESSION_TOOLS")
+    /// The in-game menu's Diagnostics (frame capture, GPU sync), for testing: off
+    /// unless madeira.cfg sets env.MADEIRA_SESSION_DIAGNOSTICS = 1. A capture
+    /// writes render-target pixels to Documents/capture, which Files shows.
+    private let sessionDiagnostics = MadeiraConfig.flag("MADEIRA_SESSION_DIAGNOSTICS", fallback: false)
+    /// The developer overlay's ECO and F pills, which a library session does not
+    /// show; read again each time the menu opens.
+    @State private var eco = madeira_get_eco() != 0
+    @State private var fenceMode = FPSOverlayFenceMode.current
     @State private var launchVisible = false
     /// The Session menu's Controller binds page (keyboard-and-mouse mode).
     @State private var bindsPage = false
@@ -3089,6 +3231,7 @@ struct LibraryHUD: View {
             LibraryController.shared.configure(enabled: model.enabled, ownsInput: open)
             if !open { bindsPage = false }
             if !open { model.saveCurrentProfile() }
+            if open { eco = madeira_get_eco() != 0; fenceMode = FPSOverlayFenceMode.current }
         }
         .onReceive(LibraryController.shared.commands) { command in
             if command == "menu" { if model.menu { model.menu = false } else { model.showMenu() } }
@@ -3261,16 +3404,47 @@ struct LibraryHUD: View {
                     }
                 }
                 Divider()
+                // ml1133's ECO switch, live: the same as the developer overlay's ECO pill.
+                Text("CPU").font(.headline)
+                Toggle("Eco mode", isOn: Binding(get: { eco }, set: { on in eco = on; madeira_set_eco(on ? 1 : 0) }))
+                Text("Runs the game's threads at a low priority, on the efficiency cores: cooler and slower. Use it while a game loads and turn it off to play.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Divider()
                 Text("Mouse & pointer").font(.headline)
                 LibraryPointerSettings()
                 Divider()
                 Toggle("Performance overlay", isOn: $model.performance)
                 if model.performance {
-                    ForEach(["FPS", "Frame time", "RAM", "Battery"], id: \.self) { field in
+                    ForEach(["FPS", "Frame time", "RAM", "Battery", "Thermal"], id: \.self) { field in
                         Toggle(field, isOn: Binding(get: { model.overlayFields.contains(field) }, set: { on in
                             model.overlayFields.removeAll { $0 == field }; if on { model.overlayFields.append(field) }
                         })).font(.subheadline)
                     }
+                }
+                // The developer overlay's CAP and F pills (FPSOverlay), for library
+                // sessions: only with MADEIRA_SESSION_DIAGNOSTICS=1 (and not with
+                // MADEIRA_SESSION_TOOLS=0).
+                if sessionTools && sessionDiagnostics {
+                    Divider()
+                    Text("Diagnostics").font(.headline)
+                    Button("Capture the next frame", systemImage: "camera.viewfinder") {
+                        model.menu = false
+                        // After the menu has gone, so the frame shows what the player saw.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            madeira_capture_request(1)
+                            LogStore.shared.log("[capture] frame capture requested from the in-game menu")
+                        }
+                    }
+                    LabeledContent("GPU sync") {
+                        Picker("GPU sync", selection: Binding(get: { fenceMode }, set: { mode in
+                            fenceMode = mode; FPSOverlayFenceMode.current = mode
+                            madeira_set_fence_mode(Int32(mode == 0 ? 7 : mode))
+                        })) {
+                            Text("F1").tag(1); Text("F6").tag(6); Text("F5").tag(5); Text("F0").tag(0)
+                        }.pickerStyle(.segmented).frame(maxWidth: 220)
+                    }
+                    Text("Both apply to Direct3D 12 games only. Capture writes the render passes of the next frame to Documents/capture and its draw list to the log. GPU sync: F1 makes every pass wait for the one before (the default), F6 waits only where the game's barriers ask, F5 makes render passes wait at the fragment stage, F0 has no sync at all (expect flicker; for tests).")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if let appID = model.activeEntry?.steamAppID, SteamOwnedLibrary.cloudQuitEnabled {
                     Divider()
@@ -3316,6 +3490,9 @@ struct LibraryMetrics: View {
     @State private var fps = 0.0
     @State private var memory = 0
     @State private var battery = -1
+    /// iOS lowers clocks from .serious on, so a frame rate that sags after a few
+    /// minutes can be told apart from one the game or the runtime caused.
+    @State private var thermal = ProcessInfo.processInfo.thermalState
     private let ticks = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     var body: some View {
         Text(parts.joined(separator: "  ·  "))
@@ -3330,6 +3507,11 @@ struct LibraryMetrics: View {
                 let result = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &size) } }
                 if result == KERN_SUCCESS { memory = Int(info.phys_footprint / 1048576) }
                 battery = UIDevice.current.batteryLevel < 0 ? -1 : Int(UIDevice.current.batteryLevel * 100)
+                let state = ProcessInfo.processInfo.thermalState
+                if state != thermal {
+                    LogStore.shared.log("[thermal] \(DeviceLoadDiagnostics.thermalName(thermal)) -> \(DeviceLoadDiagnostics.thermalName(state)) at \(String(format: "%.0f", fps)) FPS")
+                    thermal = state
+                }
             }
     }
     private var parts: [String] {
@@ -3338,6 +3520,15 @@ struct LibraryMetrics: View {
         if model.overlayFields.contains("Frame time") { result.append(fps > 0 ? String(format: "%.1f ms avg", 1000 / fps) : "— ms") }
         if model.overlayFields.contains("RAM") { result.append("\(memory) MB") }
         if model.overlayFields.contains("Battery"), battery >= 0 { result.append("\(battery)%") }
+        if model.overlayFields.contains("Thermal") {
+            switch thermal {
+            case .nominal: result.append("Cool")
+            case .fair: result.append("Warm")
+            case .serious: result.append("Hot")
+            case .critical: result.append("Critical")
+            @unknown default: break
+            }
+        }
         return result
     }
 }
