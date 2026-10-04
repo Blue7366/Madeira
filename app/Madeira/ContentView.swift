@@ -1293,6 +1293,10 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: SteamSignIn.didChange)) { _ in
                 if !SteamSignIn.isSignedIn { MadeiraDock.cleanup() }
             }
+            // A Home Screen shortcut (madeira://play?exe=...) starts its library entry,
+            // now or, from a cold start, once the library is up.
+            .onReceive(ShortcutRouter.shared.$pendingExe) { _ in launchPendingShortcut() }
+            .onChange(of: library.enabled) { _, _ in launchPendingShortcut() }
         }
     }
 
@@ -2382,6 +2386,26 @@ struct ContentView: View {
         }
     }
 
+    /// A Home Screen shortcut waiting for the library (a link opened at a cold start
+    /// arrives before the library is up).
+    private func launchPendingShortcut() {
+        guard library.enabled, library.current == nil, let exe = ShortcutRouter.shared.pendingExe else { return }
+        ShortcutRouter.shared.pendingExe = nil
+        launchShortcut(exe)
+    }
+
+    /// A Home Screen shortcut starts a game that is in the library, by its Windows
+    /// path. A link names any path, so one for a program not in the library starts
+    /// nothing: add it to the library first.
+    private func launchShortcut(_ exe: String) {
+        let key = exe.lowercased()
+        if let entry = library.entries.first(where: { $0.desktop != true && $0.windowsPath.lowercased() == key }) {
+            launchLibraryEntry(entry); return
+        }
+        LogStore.shared.log("[shortcut] \(exe) is not in the library: not started", level: .error)
+        library.error = "This shortcut's game is not in the library. Add it to the library, then use the shortcut again."
+    }
+
     /// Play in the library (Library.swift): checks that a session can start,
     /// applies the entry's launch profile and runs the same full sequence as the
     /// developer interface's buttons.
@@ -2428,7 +2452,9 @@ struct ContentView: View {
             logStore.log("[launch-preflight] profile validation failed: \(error.localizedDescription)", level: .error)
             return
         }
-        guard entry.launchWindowsPath.utf8.count < 1024, entry.launchArguments.utf8.count < 1024 else {
+        // launchArguments carries the whole ml1163 command (explorer's /desktop=, the quoted
+        // program, its arguments); validate() and the bridge's tokenizer take 4 KB.
+        guard entry.launchWindowsPath.utf8.count < 1024, entry.launchArguments.utf8.count < 4096 else {
             library.error = "The executable path or launch arguments are too long."; return
         }
         entry.configureLaunch()
@@ -2665,16 +2691,24 @@ struct ContentView: View {
             // DXMT splits DXMT_CONFIG on ";" only and a newline is not whitespace to
             // its line parser, so the options are joined with ";" (ml1095: "a=b;c=d"
             // on one line). A library game's own dxmt options come after madeira.cfg's.
+            // ml1255: "#" pieces (comments) are dropped; DXMT skips them anyway, but
+            // they would count against its length limit below.
             var dxmtOptions: [String] = []
             for (source, txt) in [("madeira.cfg dxmt", MadeiraConfig.get("dxmt")), ("the game's config", MadeiraConfig.gameValue("dxmt"))] {
                 let parts = (txt ?? "").split(whereSeparator: { $0 == ";" || $0.isNewline })
-                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("#") }
                 if !parts.isEmpty {
                     dxmtOptions += parts
-                    logStore.log("DXMT config: \(parts.joined(separator: ";")) via \(source)")
+                    logStore.log("DXMT config: \(parts.joined(separator: ";")) via \(source) (\(parts.count) option\(parts.count == 1 ? "" : "s"))")
                 }
             }
             if !dxmtOptions.isEmpty { setenv("DXMT_CONFIG", dxmtOptions.joined(separator: ";"), 1) }
+            // ml1255: DXMT reads the variable into a MAX_PATH buffer (util_env.cpp
+            // getEnvVar); from a longer value it gets nothing, and every option is lost.
+            let dxmtLength = dxmtOptions.joined(separator: ";").utf16.count
+            if dxmtLength > 259 {
+                logStore.log("DXMT config is \(dxmtLength) characters; DXMT reads at most 259 and drops ALL of it -- shorten the dxmt lines of madeira.cfg and the game's config", level: .error)
+            }
 
             // D3D9 frontend for 32-bit programs. The i386 d3d9.dll is DXMT's thin
             // shim; unset (the default) or "emulated", it forwards every export to
