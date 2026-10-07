@@ -33,14 +33,14 @@ on:
         default: Debug
 
 env:
-  MINGW_NAME: llvm-mingw-20260421-ucrt-macos-universal
-  MINGW_SHA256: bd85a3975723815cef28dbbd2ca2cb0c926f6b348a12a0453f39f7af273cb3f7
+  MINGW_NAME: llvm-mingw-20241011-ucrt-macos-universal
+  MINGW_SHA256: 3b40078426f8d3845b4c10688f6fa1ab58beea762fa2277d32c61301fa3dc179
   # LLVM for DXMT's airconv (build/dxmt-ios/README.md)
   LLVM_VERSION: 15.0.7
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: macos-14
     timeout-minutes: 360
 
     steps:
@@ -81,7 +81,7 @@ jobs:
         run: |
           mkdir -p toolchains
           curl -fsSL -o /tmp/llvm-mingw.tar.xz \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/${MINGW_NAME}.tar.xz"
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20241011/${MINGW_NAME}.tar.xz"
           echo "${MINGW_SHA256}  /tmp/llvm-mingw.tar.xz" | shasum -a 256 -c -
           tar -xJf /tmp/llvm-mingw.tar.xz -C toolchains
 
@@ -164,9 +164,6 @@ jobs:
       - name: Wine server (base archive from wine/server, then iOS replacements)
         run: |
           set -eu
-          # build/wineserver/build.sh swaps its patched objects into a prebuilt base
-          # archive that is not tracked. Rebuild that base from the submodule: every
-          # server/*.c the script does not compile itself, with the script's own flags.
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           B=build/wineserver; W=wine; OBJ=$B/obj/base
           mkdir -p "$OBJ"
@@ -224,9 +221,7 @@ jobs:
           set -eux
           mkdir -p toolchains
           git clone --depth 1 --branch "llvmorg-${LLVM_VERSION}" https://github.com/llvm/llvm-project.git toolchains/llvm-project
-          # Apple ld has no --gc-sections (build/dxmt-ios/README.md step 3)
           sed -i '' 's/MATCHES "Darwin"/MATCHES "Darwin|iOS"/' toolchains/llvm-project/llvm/cmake/modules/AddLLVM.cmake
-          # LLVM 15 predates newer libc++ dropping transitive <cstdint>
           CXXFIX="-include cstdint"
           cmake -G Ninja -S toolchains/llvm-project/llvm -B toolchains/llvm-host-build \
             -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD= -DLLVM_INCLUDE_TESTS=OFF \
@@ -266,7 +261,6 @@ jobs:
       - name: DXMT unix side + combined archive
         run: |
           set -eu
-          # airconv embeds its AIR helper shaders as headers (dxmt/src/airconv/meson.build)
           mkdir -p build/dxmt-ios/shader-headers
           for sh in air_msad air_samplepos air_tessellation; do
             (cd build/dxmt-ios/shader-headers \
@@ -275,7 +269,6 @@ jobs:
              && xxd -n $sh -i $sh.air $sh.h)
           done
           build/dxmt-ios/build.sh
-          # libdxmt_combined.a = libdxmt_unix.a + the LLVM archives airconv needs
           libtool -static -o build/dxmt-ios/libdxmt_combined.a \
             build/dxmt-ios/libdxmt_unix.a toolchains/llvm-ios-build/lib/libLLVM*.a 2>&1 | grep -v "same member name" || true
           cp build/dxmt-ios/libdxmt_combined.a app/Madeira/libdxmt_combined.a
@@ -314,7 +307,6 @@ jobs:
           APP="app/build/${{ inputs.configuration || 'Debug' }}-iphoneos/Madeira.app"
           mkdir -p Payload
           cp -R "$APP" Payload/
-          # Ad-hoc sign with the entitlements so sideloaders carry them over (JIT, memory limit)
           codesign --force --sign - --entitlements app/Madeira/Madeira.entitlements Payload/Madeira.app
           zip -qry Madeira-sideload.ipa Payload
           ls -lh Madeira-sideload.ipa
