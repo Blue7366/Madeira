@@ -3,7 +3,7 @@
 # Builds every native input the app links from the pinned submodules (docs/BUILDING.md),
 # then the app itself, and uploads Madeira-sideload.ipa as a workflow artifact.
 # The Windows-side DLL farms (aarch64-windows, arm64ec-windows) are tracked and used as is;
-# the optional 32-bit WoW64 farm (build/wine-i386) is built when enabled.
+# the optional 32-bit WoW64 farm (build/wine-i386) is now included.
 #
 # Microsoft's VC++ runtime DLLs are not part of this repository (tools/fetch-vcruntime.md).
 # Manual runs download them from Microsoft into the bundle unless the "vcruntime" input is off;
@@ -18,10 +18,6 @@ on:
       - 'docs/**'
   workflow_dispatch:
     inputs:
-      build_i386:
-        description: 'Build the optional 32-bit (i386/WoW64) PE set'
-        type: boolean
-        default: true
       vcruntime:
         description: 'Bundle Microsoft VC++ runtime DLLs (downloaded from Microsoft)'
         type: boolean
@@ -33,13 +29,14 @@ on:
         default: Debug
 
 env:
-  MINGW_NAME: llvm-mingw-20240619-ucrt-macos-universal
+  MINGW_NAME: llvm-mingw-20260421-ucrt-macos-universal
+  MINGW_SHA256: bd85a3975723815cef28dbbd2ca2cb0c926f6b348a12a0453f39f7af273cb3f7
   # LLVM for DXMT's airconv (build/dxmt-ios/README.md)
   LLVM_VERSION: 15.0.7
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 360
 
     steps:
@@ -58,7 +55,7 @@ jobs:
 
       - name: Install host tools
         run: |
-          brew install cmake ninja ccache meson bison flex llvm sevenzip cabextract msitools gnutls pkgconf autoconf automake libtool
+          brew install cmake ninja ccache meson bison flex llvm sevenzip cabextract msitools gnutls pkgconf
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
           # FEX's configure scripts (Scripts/aarch64_fit_native.py) import packaging
@@ -80,10 +77,16 @@ jobs:
         run: |
           mkdir -p toolchains
           curl -fsSL -o /tmp/llvm-mingw.tar.xz \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/20240619/${MINGW_NAME}.tar.xz"
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/${MINGW_NAME}.tar.xz"
+          echo "${MINGW_SHA256}  /tmp/llvm-mingw.tar.xz" | shasum -a 256 -c -
           tar -xJf /tmp/llvm-mingw.tar.xz -C toolchains
 
       # ------------------------------------------------------- native libs
+      - name: Build madeira_rppairing (Rust)
+        run: |
+          rustup target add aarch64-apple-ios
+          build/rppairing-ios/build.sh
+          
       - name: GnuTLS / Nettle / GMP (headers for ntdll-unix)
         run: build/gnutls-ios/build.sh
 
@@ -116,10 +119,10 @@ jobs:
           # [rpm-cas] drain calls into the rpmalloc fork, which only the PE modules link.
           p = 'FEX/FEXCore/Source/Interface/Core/Core.cpp'
           s = open(p).read()
-          start = s.find('     {\n        rpm_cas_snapshot Snap;')
+          start = s.find('      {\n        rpm_cas_snapshot Snap;')
           tail = 'Snap.fail_changed, Snap.fail_unchanged, Snap.fail_invalid);\n        }\n      }\n'
           end = s.find(tail, start)
-          if start != -1 and end != -1 and '#ifdef FEX_IOS_HOST\n     {\n        rpm_cas_snapshot Snap;' not in s:
+          if start != -1 and end != -1 and '#ifdef FEX_IOS_HOST\n      {\n        rpm_cas_snapshot Snap;' not in s:
               end += len(tail)
               s = s[:start] + '#ifdef FEX_IOS_HOST\n' + s[start:end] + '#endif\n' + s[end:]
               open(p, 'w').write(s)
@@ -159,9 +162,15 @@ jobs:
       - name: Wine win32u unix side
         run: build/win32u-unix/build.sh
 
+      - name: Wine 32-bit WoW64 support (build/wine-i386)
+        run: build/wine-i386/build.sh
+
       - name: Wine server (base archive from wine/server, then iOS replacements)
         run: |
           set -eu
+          # build/wineserver/build.sh swaps its patched objects into a prebuilt base
+          # archive that is not tracked. Rebuild that base from the submodule: every
+          # server/*.c the script does not compile itself, with the script's own flags.
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           B=build/wineserver; W=wine; OBJ=$B/obj/base
           mkdir -p "$OBJ"
@@ -185,24 +194,6 @@ jobs:
           rm -rf "$OBJ"
           build/wineserver/build.sh
 
-      - name: Resolve the 32-bit (i386) build flag
-        id: i386
-        run: |
-          flag=1
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.build_i386 }}" = "false" ]; then
-            flag=0
-          fi
-          echo "value=$flag" >> "$GITHUB_OUTPUT"
-          echo "MADEIRA_BUILD_I386=$flag" >> "$GITHUB_ENV"
-          echo "32-bit PE set: MADEIRA_BUILD_I386=$flag"
-
-      - name: Build 32-bit (i386/WoW64) PE set if enabled
-        if: steps.i386.outputs.value == '1'
-        run: |
-          if [ -f build/wine-i386/build.sh ]; then
-            bash build/wine-i386/build.sh
-          fi
-
       - name: Cache LLVM for iOS
         id: llvm-cache
         uses: actions/cache/restore@v4
@@ -219,7 +210,9 @@ jobs:
           set -eux
           mkdir -p toolchains
           git clone --depth 1 --branch "llvmorg-${LLVM_VERSION}" https://github.com/llvm/llvm-project.git toolchains/llvm-project
+          # Apple ld has no --gc-sections (build/dxmt-ios/README.md step 3)
           sed -i '' 's/MATCHES "Darwin"/MATCHES "Darwin|iOS"/' toolchains/llvm-project/llvm/cmake/modules/AddLLVM.cmake
+          # LLVM 15 predates newer libc++ dropping transitive <cstdint>
           CXXFIX="-include cstdint"
           cmake -G Ninja -S toolchains/llvm-project/llvm -B toolchains/llvm-host-build \
             -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD= -DLLVM_INCLUDE_TESTS=OFF \
@@ -251,22 +244,19 @@ jobs:
             toolchains/llvm-ios-build/lib/*.a
           key: llvm-ios-${{ env.LLVM_VERSION }}-v1
 
-      - name: Patch DXMT include paths for root location
-        run: |
-          sed -i '' 's|\.\./\.\./\.\./\.\./\.\./build/madeira_cfg\.h|\.\./\.\./\.\./\.\./build/madeira_cfg\.h|g' dxmt/src/winemetal/unix/winemetal_unix.c
-          sed -i '' 's|\.\./\.\./\.\./\.\./remote-metal/protocol\.h|\.\./\.\./\.\./research/remote-metal/protocol\.h|g' dxmt/src/winemetal/unix/wmt_remote_client.h
-
       - name: DXMT unix side + combined archive
         run: |
           set -eu
+          # airconv embeds its AIR helper shaders as headers (dxmt/src/airconv/meson.build)
           mkdir -p build/dxmt-ios/shader-headers
           for sh in air_msad air_samplepos air_tessellation; do
             (cd build/dxmt-ios/shader-headers \
              && xcrun -sdk macosx metal -std=metal3.1 --target=air64-apple-macos14.0 \
-                 -o $sh.air -c ../../../dxmt/src/airconv/shaders/$sh.metal \
+                  -o $sh.air -c ../../../dxmt/src/airconv/shaders/$sh.metal \
              && xxd -n $sh -i $sh.air $sh.h)
           done
           build/dxmt-ios/build.sh
+          # libdxmt_combined.a = libdxmt_unix.a + the LLVM archives airconv needs
           libtool -static -o build/dxmt-ios/libdxmt_combined.a \
             build/dxmt-ios/libdxmt_unix.a toolchains/llvm-ios-build/lib/libLLVM*.a 2>&1 | grep -v "same member name" || true
           cp build/dxmt-ios/libdxmt_combined.a app/Madeira/libdxmt_combined.a
@@ -305,6 +295,7 @@ jobs:
           APP="app/build/${{ inputs.configuration || 'Debug' }}-iphoneos/Madeira.app"
           mkdir -p Payload
           cp -R "$APP" Payload/
+          # Ad-hoc sign with the entitlements so sideloaders carry them over (JIT, memory limit)
           codesign --force --sign - --entitlements app/Madeira/Madeira.entitlements Payload/Madeira.app
           zip -qry Madeira-sideload.ipa Payload
           ls -lh Madeira-sideload.ipa
@@ -316,7 +307,6 @@ jobs:
           path: Madeira-sideload.ipa
           retention-days: 14
 
-      # -------------------------------------------------------- Failure Handlers / Logging
       - name: Print compiler errors
         if: failure()
         run: |
