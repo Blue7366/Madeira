@@ -34,7 +34,6 @@ on:
 
 env:
   MINGW_NAME: llvm-mingw-20240619-ucrt-macos-universal
-  MINGW_SHA256: 8f45a6c382f6e872d82bb68641bfa49cf52538cb123eb41a4a15998a1c97cb4f
   # LLVM for DXMT's airconv (build/dxmt-ios/README.md)
   LLVM_VERSION: 15.0.7
 
@@ -82,7 +81,6 @@ jobs:
           mkdir -p toolchains
           curl -fsSL -o /tmp/llvm-mingw.tar.xz \
             "https://github.com/mstorsjo/llvm-mingw/releases/download/20240619/${MINGW_NAME}.tar.xz"
-          echo "${MINGW_SHA256}  /tmp/llvm-mingw.tar.xz" | shasum -a 256 -c -
           tar -xJf /tmp/llvm-mingw.tar.xz -C toolchains
 
       # ------------------------------------------------------- native libs
@@ -175,12 +173,12 @@ jobs:
             xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK" -miphoneos-version-min=17.0 -O2 \
               -I$W/include -I$W/include/wine -I$W/build-macos/include -I$B -I$W/server \
               -Ibuild/ntdll-unix/shims -Ibuild/madsync -DHAVE_LINUX_NTSYNC_H=1 \
-              -include $B/config_ios.h -include stdarg.h -include $B/unicode_fix.h \
+              -include $B/config_ios.h -include stdarg.h -include$B/unicode_fix.h \
               -include $B/wineserver_ios_kill.h \
               -DBINDIR=\"/usr/local/bin\" -DDATADIR=\"/usr/local/share\" \
               -D__WINESRC__ -DWINE_IOS=1 -Dmain=wineserver_main \
               -Wno-implicit-function-declaration -Wno-int-conversion \
-              -c "$src" -o "$OBJ/$n.o" 2>"$B/obj/err-base-$n.txt" || { cat "$B/obj/err-base-$n.txt"; FAILED="${FAILED:-} $n"; }
+              -c "$src" -o "$OBJ/$n.o" 2>"$B/obj/err-base-$n.txt" || { cat "$B/obj/err-base-$n.txt"; FAILED="${FAILED:-}$n"; }
           done
           [ -z "${FAILED:-}" ] || { echo "::error::base server objects failed:$FAILED"; exit 1; }
           xcrun -sdk iphoneos ar rcs app/Madeira/libwineserver.a "$OBJ"/*.o
@@ -308,31 +306,4 @@ jobs:
           mkdir -p Payload
           cp -R "$APP" Payload/
           codesign --force --sign - --entitlements app/Madeira/Madeira.entitlements Payload/Madeira.app
-          zip -qry Madeira-sideload.ipa Payload
-          ls -lh Madeira-sideload.ipa
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: Madeira-sideload-ipa
-          path: Madeira-sideload.ipa
-          retention-days: 14
-
-      - name: Print compiler errors
-        if: failure()
-        run: |
-          for f in build/*/obj/*.err build/*/obj/err-*.txt; do
-            [ -s "$f" ] || continue
-            echo "::group::$f"; head -n 40 "$f"; echo "::endgroup::"
-          done
-
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            build/*/obj/*.err
-            build/*/obj/err-*.txt
-            wine/build-macos/config.log
-          if-no-files-found: ignore
+          zip -qry Madeira
