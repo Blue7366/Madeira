@@ -33,8 +33,8 @@ on:
         default: Debug
 
 env:
-  MINGW_NAME: llvm-mingw-20241011-ucrt-macos-universal
-  MINGW_SHA256: 3b40078426f8d3845b4c10688f6fa1ab58beea762fa2277d32c61301fa3dc179
+  MINGW_NAME: llvm-mingw-20240619-ucrt-macos-universal
+  MINGW_SHA256: 8f45a6c382f6e872d82bb68641bfa49cf52538cb123eb41a4a15998a1c97cb4f
   # LLVM for DXMT's airconv (build/dxmt-ios/README.md)
   LLVM_VERSION: 15.0.7
 
@@ -81,7 +81,7 @@ jobs:
         run: |
           mkdir -p toolchains
           curl -fsSL -o /tmp/llvm-mingw.tar.xz \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/20241011/${MINGW_NAME}.tar.xz"
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20240619/${MINGW_NAME}.tar.xz"
           echo "${MINGW_SHA256}  /tmp/llvm-mingw.tar.xz" | shasum -a 256 -c -
           tar -xJf /tmp/llvm-mingw.tar.xz -C toolchains
 
