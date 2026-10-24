@@ -27,6 +27,7 @@ FAILED_FILES=""
 compile_one() {
     local src=$1
     local name=$2
+    shift 2   # anything after src and name: extra flags for this file only
     echo -n "  $name... "
 
     if xcrun -sdk iphoneos clang \
@@ -46,6 +47,7 @@ compile_one() {
         "${RUSAGE_PAGE_WAIT_FLAGS[@]}" \
         -Dget_thread_context=ntdll_get_thread_context \
         -Dset_thread_context=ntdll_set_thread_context \
+        "$@" \
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"
         SUCCEEDED=$((SUCCEEDED + 1))
@@ -201,6 +203,23 @@ for src in $WINE_SRC/dlls/ntdll/unix/*.c; do
             ;;
         thread)
             compile_one "$BUILD_DIR/thread_ios.c" "thread"
+            ;;
+        sync)
+            # madeira-bcd: a NULL keyed-event handle resolves per guest process
+            # (ios_default_keyed_event, loader_ios.c), not to the first process's
+            # global. The copy is compiled from obj/, so its one relative include
+            # is made absolute; the build fails if the source no longer matches.
+            perl -0pe 's/(NTSTATUS WINAPI NtWaitForKeyedEvent\()/HANDLE ios_default_keyed_event(void);\n$1/;
+                       s/if \(!handle\) handle = keyed_event;/if (!handle) handle = ios_default_keyed_event();/g;
+                       s{"\.\./\.\./\.\./\.\./build/madeira_cfg\.h"}{"'"$REPO_ROOT"'/build/madeira_cfg.h"}' \
+                "$src" > "$OBJ_DIR/sync_ios.c"
+            if [ "$(grep -c 'handle = ios_default_keyed_event()' "$OBJ_DIR/sync_ios.c")" != 2 ]; then
+                echo "  sync: keyed-event patch did not apply"; exit 1
+            fi
+            # MADEIRA_THREAD_QOS (thread_ios.c): ios_eco_apply_self sets a guest
+            # thread's QoS through madeira_guest_qos_self, which picks the class
+            # given for the thread's name; with the variable unset it passes through.
+            compile_one "$OBJ_DIR/sync_ios.c" "sync" -Dpthread_set_qos_class_self_np=madeira_guest_qos_self
             ;;
         *)
             compile_one "$src" "$name"
