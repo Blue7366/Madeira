@@ -28,7 +28,8 @@ jobs:
           if git merge-base --is-ancestor FETCH_HEAD HEAD; then
             echo "new=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          git merge --no-edit FETCH_HEAD
+          # Automatically resolve conflicts by taking upstream changes (-X theirs)
+          git merge --no-edit -X theirs FETCH_HEAD
           git push origin "HEAD:${GITHUB_REF_NAME}"
           echo "new=true" >> "$GITHUB_OUTPUT"
       - name: Build the IPA with the VC++ runtime
